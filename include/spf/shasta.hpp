@@ -83,31 +83,40 @@ inline Policy3 full_policy(const Grid& gr) {
   return make_policy(b, e);
 }
 
+namespace detail {
+
+// Kernels are named functors, not KOKKOS_LAMBDAs: an nvcc extended lambda defined in a non-template inline function of a
+// header that is compiled in several translation units can end up with an unset host-side wrapper pointer in optimised
+// builds (null call at the first launch). Functors do not use that mechanism.
+struct GhostFillK {
+  Field3 f;
+  int dir, g, n, periodic, left, off;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
+    int c[3] = {i, j, k};
+    const int a = c[dir] - off;  // 0 .. g-1 within the ghost layer
+    int src;
+    if (left) src = periodic ? a + n : g;
+    else src = periodic ? g + a : g + n - 1;
+    int s[3] = {i, j, k};
+    s[dir] = src;
+    f(i, j, k) = f(s[0], s[1], s[2]);
+  }
+};
+
+}  // namespace detail
+
 // Fill the ghost layers along direction dir of one field (periodic or zero-gradient).
 // Transverse ghost layers are included in the loop range, so apply the directions in sequence for 3D.
 inline void fill_ghost(const Grid& gr, int dir, Boundary bc, const Field3& F) {
   const int g = gr.g[dir], n = gr.n[dir];
   if (g == 0) return;
-  const int periodic = (bc == Boundary::Periodic) ? 1 : 0;
-  Field3 f = F;
   for (int side = 0; side < 2; ++side) {
     int b[3] = {0, 0, 0};
     int e[3] = {gr.size(0), gr.size(1), gr.size(2)};
     b[dir] = side == 0 ? 0 : g + n;
     e[dir] = side == 0 ? g : g + n + g;
-    const int left = (side == 0) ? 1 : 0;
-    const int off = b[dir];
-    Kokkos::parallel_for(
-        "spf_fill_ghost", make_policy(b, e), KOKKOS_LAMBDA(const int i, const int j, const int k) {
-          int c[3] = {i, j, k};
-          const int a = c[dir] - off;  // 0 .. g-1 within the ghost layer
-          int src;
-          if (left) src = periodic ? a + n : g;
-          else src = periodic ? g + a : g + n - 1;
-          int s[3] = {i, j, k};
-          s[dir] = src;
-          f(i, j, k) = f(s[0], s[1], s[2]);
-        });
+    detail::GhostFillK k{F, dir, g, n, bc == Boundary::Periodic ? 1 : 0, side == 0 ? 1 : 0, b[dir]};
+    Kokkos::parallel_for("spf_fill_ghost", make_policy(b, e), k);
   }
 }
 
@@ -115,6 +124,83 @@ struct ShastaWork {
   Field3 ut, a, at;
   explicit ShastaWork(const Grid& gr) : ut(gr.make_field("shasta_ut")), a(gr.make_field("shasta_a")), at(gr.make_field("shasta_at")) {}
 };
+
+namespace detail {
+
+struct TransportDiffusionK {
+  Field3 U, v, f, ut;
+  int o0, o1, o2;
+  Real lam;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
+    const Real e0 = lam * v(i, j, k);
+    const Real ep = lam * v(i + o0, j + o1, k + o2);
+    const Real em = lam * v(i - o0, j - o1, k - o2);
+    const Real qp = (0.5 - e0) / (1.0 + (ep - e0));
+    const Real qm = (0.5 + e0) / (1.0 - (em - e0));
+    const Real u0 = U(i, j, k);
+    const Real d_j = U(i + o0, j + o1, k + o2) - u0;
+    const Real d_jm = u0 - U(i - o0, j - o1, k - o2);
+    const Real df = -0.5 * (f(i + o0, j + o1, k + o2) - f(i - o0, j - o1, k - o2));
+    ut(i, j, k) = 0.5 * qp * qp * d_j - 0.5 * qm * qm * d_jm + (qp + qm) * u0 + lam * df;
+  }
+};
+
+struct AntidiffusiveFluxK {
+  Field3 U, ut, a;
+  int o0, o1, o2, ph;
+  Real eta;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
+    const Real dt_j = ut(i + o0, j + o1, k + o2) - ut(i, j, k);
+    Real flux = dt_j;
+    if (ph) {
+      const Real d_jp = U(i + 2 * o0, j + 2 * o1, k + 2 * o2) - U(i + o0, j + o1, k + o2);
+      const Real d_j = U(i + o0, j + o1, k + o2) - U(i, j, k);
+      const Real d_jm = U(i, j, k) - U(i - o0, j - o1, k - o2);
+      flux = dt_j - 0.125 * (d_jp - 2.0 * d_j + d_jm);
+    }
+    a(i, j, k) = eta * flux;
+  }
+};
+
+struct LimiterK {
+  Field3 ut, a, at;
+  int o0, o1, o2;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
+    const Real av = a(i, j, k);
+    const Real s = (av >= 0.0) ? 1.0 : -1.0;
+    const Real dt_p = ut(i + 2 * o0, j + 2 * o1, k + 2 * o2) - ut(i + o0, j + o1, k + o2);
+    const Real dt_m = ut(i, j, k) - ut(i - o0, j - o1, k - o2);
+    const Real m = Kokkos::fmin(Kokkos::fmin(s * dt_p, Kokkos::fabs(av)), s * dt_m);
+    at(i, j, k) = s * Kokkos::fmax(0.0, m);
+  }
+};
+
+struct UpdateK {
+  Field3 ut, at, Uo;
+  int o0, o1, o2;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
+    Uo(i, j, k) = ut(i, j, k) - at(i, j, k) + at(i - o0, j - o1, k - o2);
+  }
+};
+
+struct SumK {
+  Field3 f;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, Real& acc) const { acc += f(i, j, k); }
+};
+struct MaxK {
+  Field3 f;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, Real& acc) const {
+    if (f(i, j, k) > acc) acc = f(i, j, k);
+  }
+};
+struct MinK {
+  Field3 f;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, Real& acc) const {
+    if (f(i, j, k) < acc) acc = f(i, j, k);
+  }
+};
+
+}  // namespace detail
 
 // One SHASTA step of one component U along direction dir:
 //   Uout = shasta(U; v, f) with  lam = dt/dx  (use lam = dt/(2 dx) for the half step).
@@ -125,92 +211,48 @@ inline void shasta_step(const Grid& gr, int dir, Real lam, const ShastaParams& p
   const int o0 = dir == 0, o1 = dir == 1, o2 = dir == 2;
   const int g = gr.g[dir], n = gr.n[dir];
   const int ph = prm.phoenical ? 1 : 0;
-  const Real eta = prm.eta_ad;
-  const Field3 Ul = U, vl = v, fl = f, Uo = Uout, ut = w.ut, aa = w.a, at = w.at;
 
-  int bI[3] = {gr.g[0], gr.g[1], gr.g[2]};
-  int eI[3] = {gr.g[0] + gr.n[0], gr.g[1] + gr.n[1], gr.g[2] + gr.n[2]};
+  const int bI[3] = {gr.g[0], gr.g[1], gr.g[2]};
+  const int eI[3] = {gr.g[0] + gr.n[0], gr.g[1] + gr.n[1], gr.g[2] + gr.n[2]};
 
   // stage 1: transported and diffused Utilde on [g-2, g+n+2)
   {
     int b[3] = {bI[0], bI[1], bI[2]}, e[3] = {eI[0], eI[1], eI[2]};
     b[dir] = g - 2; e[dir] = g + n + 2;
-    Kokkos::parallel_for(
-        "shasta_transport_diffusion", make_policy(b, e), KOKKOS_LAMBDA(const int i, const int j, const int k) {
-          const Real e0 = lam * vl(i, j, k);
-          const Real ep = lam * vl(i + o0, j + o1, k + o2);
-          const Real em = lam * vl(i - o0, j - o1, k - o2);
-          const Real qp = (0.5 - e0) / (1.0 + (ep - e0));
-          const Real qm = (0.5 + e0) / (1.0 - (em - e0));
-          const Real u0 = Ul(i, j, k);
-          const Real d_j = Ul(i + o0, j + o1, k + o2) - u0;
-          const Real d_jm = u0 - Ul(i - o0, j - o1, k - o2);
-          const Real df = -0.5 * (fl(i + o0, j + o1, k + o2) - fl(i - o0, j - o1, k - o2));
-          ut(i, j, k) = 0.5 * qp * qp * d_j - 0.5 * qm * qm * d_jm + (qp + qm) * u0 + lam * df;
-        });
+    Kokkos::parallel_for("shasta_transport_diffusion", make_policy(b, e),
+                         detail::TransportDiffusionK{U, v, f, w.ut, o0, o1, o2, lam});
   }
   // stage 2: antidiffusive flux A_j on [g-1, g+n)
   {
     int b[3] = {bI[0], bI[1], bI[2]}, e[3] = {eI[0], eI[1], eI[2]};
     b[dir] = g - 1; e[dir] = g + n;
-    Kokkos::parallel_for(
-        "shasta_antidiffusive_flux", make_policy(b, e), KOKKOS_LAMBDA(const int i, const int j, const int k) {
-          const Real dt_j = ut(i + o0, j + o1, k + o2) - ut(i, j, k);
-          Real flux = dt_j;
-          if (ph) {
-            const Real d_jp = Ul(i + 2 * o0, j + 2 * o1, k + 2 * o2) - Ul(i + o0, j + o1, k + o2);
-            const Real d_j = Ul(i + o0, j + o1, k + o2) - Ul(i, j, k);
-            const Real d_jm = Ul(i, j, k) - Ul(i - o0, j - o1, k - o2);
-            flux = dt_j - 0.125 * (d_jp - 2.0 * d_j + d_jm);
-          }
-          aa(i, j, k) = eta * flux;
-        });
+    Kokkos::parallel_for("shasta_antidiffusive_flux", make_policy(b, e),
+                         detail::AntidiffusiveFluxK{U, w.ut, w.a, o0, o1, o2, ph, prm.eta_ad});
   }
   // stage 3: flux limiter on [g-1, g+n)
   {
     int b[3] = {bI[0], bI[1], bI[2]}, e[3] = {eI[0], eI[1], eI[2]};
     b[dir] = g - 1; e[dir] = g + n;
-    Kokkos::parallel_for(
-        "shasta_limiter", make_policy(b, e), KOKKOS_LAMBDA(const int i, const int j, const int k) {
-          const Real a = aa(i, j, k);
-          const Real s = (a >= 0.0) ? 1.0 : -1.0;
-          const Real dt_p = ut(i + 2 * o0, j + 2 * o1, k + 2 * o2) - ut(i + o0, j + o1, k + o2);
-          const Real dt_m = ut(i, j, k) - ut(i - o0, j - o1, k - o2);
-          const Real m = Kokkos::fmin(Kokkos::fmin(s * dt_p, Kokkos::fabs(a)), s * dt_m);
-          at(i, j, k) = s * Kokkos::fmax(0.0, m);
-        });
+    Kokkos::parallel_for("shasta_limiter", make_policy(b, e), detail::LimiterK{w.ut, w.a, w.at, o0, o1, o2});
   }
   // stage 4: update on the interior
-  Kokkos::parallel_for(
-      "shasta_update", make_policy(bI, eI), KOKKOS_LAMBDA(const int i, const int j, const int k) {
-        Uo(i, j, k) = ut(i, j, k) - at(i, j, k) + at(i - o0, j - o1, k - o2);
-      });
+  Kokkos::parallel_for("shasta_update", make_policy(bI, eI), detail::UpdateK{w.ut, w.at, Uout, o0, o1, o2});
 }
 
 // Sum over the interior [field units].
 inline Real field_sum(const Grid& gr, const Field3& F) {
   Real s = 0.0;
-  const Field3 f = F;
-  Kokkos::parallel_reduce(
-      "spf_sum", interior_policy(gr), KOKKOS_LAMBDA(const int i, const int j, const int k, Real& acc) { acc += f(i, j, k); }, s);
+  Kokkos::parallel_reduce("spf_sum", interior_policy(gr), detail::SumK{F}, s);
   return s;
 }
 inline Real field_max(const Grid& gr, const Field3& F) {
   Real m;
-  const Field3 f = F;
-  Kokkos::parallel_reduce(
-      "spf_max", interior_policy(gr),
-      KOKKOS_LAMBDA(const int i, const int j, const int k, Real& acc) { if (f(i, j, k) > acc) acc = f(i, j, k); },
-      Kokkos::Max<Real>(m));
+  Kokkos::parallel_reduce("spf_max", interior_policy(gr), detail::MaxK{F}, Kokkos::Max<Real>(m));
   return m;
 }
 inline Real field_min(const Grid& gr, const Field3& F) {
   Real m;
-  const Field3 f = F;
-  Kokkos::parallel_reduce(
-      "spf_min", interior_policy(gr),
-      KOKKOS_LAMBDA(const int i, const int j, const int k, Real& acc) { if (f(i, j, k) < acc) acc = f(i, j, k); },
-      Kokkos::Min<Real>(m));
+  Kokkos::parallel_reduce("spf_min", interior_policy(gr), detail::MinK{F}, Kokkos::Min<Real>(m));
   return m;
 }
 
