@@ -9,10 +9,14 @@
     "precision": "double"
   },
   "output": {
-    "dir": "out"
+    "dir": "out",
+    "snapshot_every": 0
   },
   "grid": {
     "dx_fm": 0.2,
+    "nx": 64,
+    "ny": 64,
+    "nz": 64,
     "boundary": "periodic"
   },
   "shasta": {
