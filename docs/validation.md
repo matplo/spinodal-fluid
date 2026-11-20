@@ -73,3 +73,29 @@ Notes
 * The `E >= abs(M)` restriction acts in the vacuum front of T1.3 (about 2 cells per step); it never acts in T1.1 or T1.2.
 * The reference file `tests/data/shock400_reference.csv` was written by the Serial build of this branch
   (`SPF_WRITE_REFERENCE=1 spf_tests -tc="T1.5*"`); it checks that other builds reproduce it.
+
+### WP1 regression: Release CUDA build crashed in the 1D solver tests (found in review, fixed)
+
+* Symptom: with the preset `cuda-turing75` (Release, CUDA 12.9, GCC 13.4, TITAN RTX) every test case that uses `Hydro1D`
+  (T1.2, T1.3, T1.4, T1.5) ended with SIGSEGV; T1.1 and the equation-of-state tests passed. The `RelWithDebInfo` build
+  (-O2 -g) with and without Kokkos debug checks passed, as did the CPU builds and a CPU build with AddressSanitizer and
+  UBSan (28 cases, 264 assertions).
+* Diagnosis: a Release build with `-g` (same -O3 as Release) under gdb showed a call through a null function pointer
+  (`pc = 0x0`) from nvcc's host-side wrapper of an extended lambda (`__nv_hdl_wrapper_t`) in the first `fill_ghost` launch
+  made from `test_hydro1d.cpp`. `fill_ghost`, `shasta_step` and the field reductions were non-template inline functions in
+  `shasta.hpp` containing `KOKKOS_LAMBDA`s and were compiled in two translation units (`test_shasta.cpp`,
+  `test_hydro1d.cpp`); in the optimised build the copy selected at link time had an unset wrapper pointer.
+* Fix: all kernels of `shasta.hpp` and `hydro1d.hpp` are now named functor structs with `KOKKOS_INLINE_FUNCTION` call
+  operators (no extended lambdas in the library headers). Algorithm and arithmetic are unchanged; the CPU results are
+  identical (Serial and OpenMP reproduce the T1.5 reference with deviation 0).
+* GPU result after the fix (the GPU node, Release preset `cuda-turing75`, Kokkos Cuda backend):
+
+| Tree | Result |
+|---|---|
+| WP1 branch alone | `ctest` 2/2 passed; `spf_tests` 19 cases, 161 assertions passed; also with `CUDA_LAUNCH_BLOCKING=1` (T1.* cases: 7 cases, 103 assertions) |
+| WP1 headers on top of the EoS package (28 test cases) | `ctest` 2/2 passed; `spf_tests` 28 cases, 264 assertions passed |
+| T1.2 L1(eps), 200 / 400 / 800 cells | 3.144507 / 1.592549 / 0.8157396 GeV/fm^2 (identical to the CPU values), order 0.981, 0.965 |
+| T1.3 relative L1 of T^00 (phoenical / explicit) | 1.04% / 1.11% (CPU: 1.04% / 1.11%); restriction count 200 / 199 |
+| T1.4 L1 at 400 cells, 8 variants | identical to the CPU values in the table above |
+| T1.5 Cuda vs stored reference, 400 cells | max relative deviation eps 7.1e-14, rho 1.6e-13, v 4.1e-14 (tolerance 1e-12) |
+| T1.1 | conservation <= 1.0e-14, extrema unchanged, Gaussian L1 7.156e-3 / 1.929e-3 / 5.333e-4 |
