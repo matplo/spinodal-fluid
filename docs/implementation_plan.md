@@ -154,7 +154,9 @@ for parameter scans and for ML training sets. The gain is not assumed: WP3g meas
 
 Technology: **Kokkos**, one source for the Serial and OpenMP backends (CPU, including macOS) and the CUDA backend (TITAN RTX is a Turing card: `Kokkos_ARCH_TURING75`).
 Kokkos 5.3.0 (released 2026-11-11) is pinned by tag and commit. Its requirements, read from `cmake/kokkos_compiler_id.cmake` of that tag: C++20, CMake ≥ 3.22,
-GCC ≥ 10.4 or Clang ≥ 14, and nvcc ≥ 12.2 for the CUDA backend. (Revision 2 of this plan named 5.1.0 as the current release; that was out of date.)
+GCC ≥ 10.4 or Clang ≥ 14, and nvcc ≥ 12.2 for the CUDA backend.
+On the GPU node (Ubuntu 22.04, system GCC 11.4, CMake 3.22.1) the system CUDA toolkit is 11.5 and therefore too old; the CUDA build uses a conda environment
+(CUDA toolkit 12.9, GCC 13.4, CMake 4.5, Ninja), see `docs/validation.md`. No fall-back to Kokkos 4.7 was needed.
 Alternatives considered and not chosen: native CUDA (no development path on a machine without an NVIDIA GPU, two code paths to keep in agreement), OpenMP target offload and `std::par` (GPU support tied to specific compilers).
 
 Coding rules that keep every kernel device-compatible (apply from WP1 on, also when only the CPU backend is being run):
@@ -385,6 +387,8 @@ Superseded choices are appended, not deleted.
 ---
 
 ## 8. Project decisions (2026-11-20)
+
+WP0 is complete (see `docs/validation.md`). Next: WP1 and WP2a, each on its own branch with a pull request against `main`.
 
 1. One public repository, BSD-3-Clause; the linear-response library lives inside it.
 2. GPU use where it gives a measured gain (Sect. 4.1, WP3g).

@@ -22,7 +22,7 @@ been measured so far.
 
 | Package | Content | State |
 |---|---|---|
-| WP0 | repository, build presets, configuration, CI | in progress |
+| WP0 | repository, build presets, configuration, CI | done |
 | WP1 | SHASTA in one dimension | not started |
 | WP2 | equations of state | reference prototype in `tools/eos/` |
 | WP3 | 3+1D solver, GPU validation | not started |
