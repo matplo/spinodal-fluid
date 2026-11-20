@@ -75,6 +75,50 @@ KOKKOS_INLINE_FUNCTION int recover_primitives(const EoS& eos, Real R, Real M, Re
   return fail;
 }
 
+namespace detail {
+
+template <class EoS>
+struct RecoverK {
+  EoS eos;
+  Real e_vac;
+  Field3 R, M, E, eps, rho, v, p, pv;
+  Kokkos::View<int***> fail;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
+    Real ee, rr, vv, pp;
+    const int fl = recover_primitives(eos, R(i, j, k), M(i, j, k), E(i, j, k), e_vac, ee, rr, vv, pp);
+    eps(i, j, k) = ee; rho(i, j, k) = rr; v(i, j, k) = vv; p(i, j, k) = pp;
+    pv(i, j, k) = pp * vv;
+    fail(i, j, k) = fl;
+  }
+};
+
+struct CountFailK {
+  Kokkos::View<int***> fail;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, long& acc) const { acc += fail(i, j, k); }
+};
+
+struct EnforceK {
+  Field3 R, M, E;
+  Real e_vac;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, long& acc) const {
+    if (E(i, j, k) < e_vac) {
+      R(i, j, k) = 0.0; M(i, j, k) = 0.0; E(i, j, k) = 0.0;
+    } else if (Kokkos::fabs(M(i, j, k)) > E(i, j, k)) {
+      M(i, j, k) = (M(i, j, k) > 0.0) ? E(i, j, k) : -E(i, j, k);
+      acc += 1;
+    }
+  }
+};
+
+struct CountEltMK {
+  Field3 M, E;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, long& acc) const {
+    if (E(i, j, k) < Kokkos::fabs(M(i, j, k))) acc += 1;
+  }
+};
+
+}  // namespace detail
+
 template <class EoS>
 struct Hydro1D {
   EoS eos;
@@ -135,23 +179,10 @@ struct Hydro1D {
   // Recover (eps, rho, v, p) and p v from Q on all cells including ghosts. Q must have valid ghosts.
   // Returns the number of interior cells whose recovery failed.
   long recover_from(Field3* Q) {
-    const EoS e_ = eos;
-    const Real ev = prm.e_vac;
-    const Field3 R = Q[0], M = Q[1], E = Q[2];
-    const Field3 eps_l = eps, rho_l = rho, v_l = v, p_l = p, pv_l = pv;
-    const Kokkos::View<int***> fl = fail;
-    Kokkos::parallel_for(
-        "hydro1d_recover", full_policy(grid), KOKKOS_LAMBDA(const int i, const int j, const int k) {
-          Real ee, rr, vv, pp;
-          const int f = recover_primitives(e_, R(i, j, k), M(i, j, k), E(i, j, k), ev, ee, rr, vv, pp);
-          eps_l(i, j, k) = ee; rho_l(i, j, k) = rr; v_l(i, j, k) = vv; p_l(i, j, k) = pp;
-          pv_l(i, j, k) = pp * vv;
-          fl(i, j, k) = f;
-        });
+    Kokkos::parallel_for("hydro1d_recover", full_policy(grid),
+                         detail::RecoverK<EoS>{eos, prm.e_vac, Q[0], Q[1], Q[2], eps, rho, v, p, pv, fail});
     long nf = 0;
-    Kokkos::parallel_reduce(
-        "hydro1d_count_fail", interior_policy(grid),
-        KOKKOS_LAMBDA(const int i, const int j, const int k, long& acc) { acc += fl(i, j, k); }, nf);
+    Kokkos::parallel_reduce("hydro1d_count_fail", interior_policy(grid), detail::CountFailK{fail}, nf);
     n_recover_fail_total += nf;
     return nf;
   }
@@ -164,20 +195,8 @@ struct Hydro1D {
 
   // Enforce E >= |M| (restrict |M| to E) and zero vacuum cells (E < e_vac) on the interior of Q. Returns the clamp count.
   long enforce(Field3* Q) {
-    const Field3 R = Q[0], M = Q[1], E = Q[2];
-    const Real ev = prm.e_vac;
     long nc = 0;
-    Kokkos::parallel_reduce(
-        "hydro1d_enforce", interior_policy(grid),
-        KOKKOS_LAMBDA(const int i, const int j, const int k, long& acc) {
-          if (E(i, j, k) < ev) {
-            R(i, j, k) = 0.0; M(i, j, k) = 0.0; E(i, j, k) = 0.0;
-          } else if (Kokkos::fabs(M(i, j, k)) > E(i, j, k)) {
-            M(i, j, k) = (M(i, j, k) > 0.0) ? E(i, j, k) : -E(i, j, k);
-            acc += 1;
-          }
-        },
-        nc);
+    Kokkos::parallel_reduce("hydro1d_enforce", interior_policy(grid), detail::EnforceK{Q[0], Q[1], Q[2], prm.e_vac}, nc);
     n_clamped_total += nc;
     return nc;
   }
@@ -206,14 +225,8 @@ struct Hydro1D {
 
   // Number of interior cells with E < |M| (after enforce this must be zero).
   long count_E_lt_M() const {
-    const Field3 M = U[1], E = U[2];
     long n = 0;
-    Kokkos::parallel_reduce(
-        "hydro1d_count_EltM", interior_policy(grid),
-        KOKKOS_LAMBDA(const int i, const int j, const int k, long& acc) {
-          if (E(i, j, k) < Kokkos::fabs(M(i, j, k))) acc += 1;
-        },
-        n);
+    Kokkos::parallel_reduce("hydro1d_count_EltM", interior_policy(grid), detail::CountEltMK{U[1], U[2]}, n);
     return n;
   }
 

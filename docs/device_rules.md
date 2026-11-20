@@ -5,7 +5,9 @@ also while only a CPU backend is being built. A kernel that cannot run on the de
 
 1. Fields live in `Kokkos::View` (`spf::Field3`). No STL containers, raw `new`, I/O, exceptions, virtual calls,
    `std::function` or allocation inside a kernel.
-2. Kernels are `KOKKOS_LAMBDA` or `KOKKOS_INLINE_FUNCTION`, launched with `Kokkos::parallel_for` over an `MDRangePolicy`.
+2. Kernels in headers are named functor structs with a `KOKKOS_INLINE_FUNCTION operator()`, launched with `Kokkos::parallel_for` over an `MDRangePolicy`.
+   `KOKKOS_LAMBDA` is allowed only inside a single `.cpp` file (tests, apps). Reason: with nvcc, a lambda kernel inside a non-template inline header
+   function that is compiled in more than one translation unit crashed the optimised CUDA build (see `docs/validation.md`, WP1).
 3. Each stage of an algorithm (for SHASTA: transport + diffusion, antidiffusive flux, limiter, update) is its own
    `parallel_for` that reads one set of Views and writes another, so that the result does not depend on execution order.
 4. An equation of state is a trivially copyable struct with `KOKKOS_INLINE_FUNCTION` members; table data sit in a
