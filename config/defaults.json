@@ -1,0 +1,54 @@
+{
+  "constants": {
+    "hbarc_GeV_fm": 0.1973269804,
+    "rho_s_fm3": 0.153,
+    "m_N_GeV": 0.94
+  },
+  "run": {
+    "backend": "auto",
+    "precision": "double"
+  },
+  "output": {
+    "dir": "out"
+  },
+  "grid": {
+    "dx_fm": 0.2
+  },
+  "shasta": {
+    "antidiffusion": "phoenical",
+    "eta_ad": 0.125,
+    "lambda": 0.4,
+    "sweep_order": "permuted",
+    "e_vac_GeV_fm3": 1e-12
+  },
+  "eos": {
+    "model": "table_two_phase",
+    "table_path": "",
+    "table_interpolation": "bilinear",
+    "extrapolate": false,
+    "scale_b": 1.0,
+    "scale_c": 1.0,
+    "finite_T_construction": "undecided",
+    "hadron_constants": "relativistic"
+  },
+  "gradient": {
+    "form": "paper_pressure",
+    "a_fm": 0.033,
+    "in_primitive_recovery": "lagged"
+  },
+  "ic": {
+    "generator": "smash_cascade",
+    "t_init_radius_mode": "r0_A13",
+    "t_init_r0_fm": 1.2,
+    "t_init_radius_fm": 6.62,
+    "sigma_init_fm": 1.0,
+    "gaussian_contraction": "undecided"
+  },
+  "obs": {
+    "moment_density": "computational_frame",
+    "clump_rho_min_rho_s": 7.0
+  },
+  "linear": {
+    "particle_density_in_spline_region": "linear_in_rho"
+  }
+}

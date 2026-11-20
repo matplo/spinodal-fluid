@@ -1,0 +1,3 @@
+#pragma once
+#define SPF_VERSION "@PROJECT_VERSION@"
+#define SPF_GIT_DESCRIBE "@SPF_GIT_DESCRIBE@"

@@ -1,0 +1,108 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 22,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "Kokkos_ENABLE_SERIAL": "ON"
+      }
+    },
+    {
+      "name": "cpu-serial",
+      "displayName": "CPU, Serial backend (reference)",
+      "inherits": "base"
+    },
+    {
+      "name": "cpu-openmp",
+      "displayName": "CPU, OpenMP backend",
+      "inherits": "base",
+      "cacheVariables": {
+        "Kokkos_ENABLE_OPENMP": "ON"
+      }
+    },
+    {
+      "name": "cuda",
+      "displayName": "NVIDIA GPU, CUDA backend",
+      "inherits": "base",
+      "cacheVariables": {
+        "Kokkos_ENABLE_CUDA": "ON"
+      }
+    },
+    {
+      "name": "cuda-turing75",
+      "displayName": "CUDA backend tuned for Turing cards (sm_75)",
+      "inherits": "cuda",
+      "cacheVariables": {
+        "Kokkos_ARCH_TURING75": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "cpu-serial",
+      "configurePreset": "cpu-serial"
+    },
+    {
+      "name": "cpu-openmp",
+      "configurePreset": "cpu-openmp"
+    },
+    {
+      "name": "cuda",
+      "configurePreset": "cuda"
+    },
+    {
+      "name": "cuda-turing75",
+      "configurePreset": "cuda-turing75"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "cpu-serial",
+      "configurePreset": "cpu-serial",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "OMP_PROC_BIND": "false"
+      }
+    },
+    {
+      "name": "cpu-openmp",
+      "configurePreset": "cpu-openmp",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "OMP_PROC_BIND": "false"
+      }
+    },
+    {
+      "name": "cuda",
+      "configurePreset": "cuda",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "OMP_PROC_BIND": "false"
+      }
+    },
+    {
+      "name": "cuda-turing75",
+      "configurePreset": "cuda-turing75",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "OMP_PROC_BIND": "false"
+      }
+    }
+  ]
+}
