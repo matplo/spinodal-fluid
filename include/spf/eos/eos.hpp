@@ -4,3 +4,5 @@
 #include "spf/eos/cold_thermal.hpp"
 #include "spf/eos/concept.hpp"
 #include "spf/eos/model.hpp"
+#include "spf/eos/scaled.hpp"
+#include "spf/eos/table.hpp"
