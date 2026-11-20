@@ -24,7 +24,7 @@ been measured so far.
 |---|---|---|
 | WP0 | repository, build presets, configuration, CI | done |
 | WP1 | SHASTA in one dimension | not started |
-| WP2 | equations of state | reference prototype in `tools/eos/` |
+| WP2 | equations of state | analytic EoS done; tables pending |
 | WP3 | 3+1D solver, GPU validation | not started |
 | WP4 | finite-range term, spinodal growth rates | not started |
 | WP5-7 | initial conditions, observables, collision runs | not started |
