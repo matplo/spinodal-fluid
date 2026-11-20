@@ -29,7 +29,11 @@
     "scale_b": 1.0,
     "scale_c": 1.0,
     "finite_T_construction": "undecided",
-    "hadron_constants": "relativistic"
+    "hadron_constants": "relativistic",
+    "gamma_th": 1.3333333333333333,
+    "gamma_law_gamma": 1.6666666666666667,
+    "gamma_law_mass_GeV": 0.940,
+    "cold_curve_path": "data/eos/cold_curve.dat"
   },
   "gradient": {
     "form": "paper_pressure",
