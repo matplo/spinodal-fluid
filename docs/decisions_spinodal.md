@@ -14,7 +14,7 @@ Every modelling choice is a named key in `config/defaults.json` (or a build pres
 | S06 | `eos.table_interpolation` | `bilinear`* / `bicubic` | planned (WP2c) |
 | S07 | `gradient.form`, `gradient.a_fm` | `paper_pressure`* / `korteweg_full` / `off`; a = 0.033 fm* / 0 / 0.01 / 0.05 | planned (WP4) |
 | S08 | `gradient.in_primitive_recovery` | `lagged`* / `force_only` | planned (WP4) |
-| S09 | `shasta.antidiffusion`, `shasta.eta_ad`, `shasta.lambda`, `shasta.sweep_order`, `grid.dx_fm` | `phoenical`* / `explicit`; 0.125*; 0.4*; `permuted`* / `fixed`; 0.2 fm* / 0.1 fm | planned (WP1, WP3) |
+| S09 | `shasta.antidiffusion`, `shasta.eta_ad`, `shasta.lambda`, `shasta.sweep_order`, `grid.dx_fm` | `phoenical`* / `explicit`; 0.125*; 0.4*; `permuted`* / `fixed`; 0.2 fm* / 0.1 fm | antidiffusion, eta_ad, lambda implemented and tested (WP1); `grid.boundary` (`periodic`* / `outflow`) added; sweep_order and grid.dx_fm planned (WP3) |
 | S10 | `obs.moment_density`, `obs.clump_rho_min_rho_s` | `computational_frame`* / `rest_frame`; 7 rho_s* | planned (WP6) |
 | S11 | `eos.finite_T_construction` | `undecided`* (WP2b); each rejected candidate is kept as an alternative | planned (WP2b) |
 | S12 | `linear.particle_density_in_spline_region` | `linear_in_rho`* / `hadron_side` / `plasma_side` | planned (WP8) |
