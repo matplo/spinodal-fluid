@@ -12,7 +12,8 @@
     "dir": "out"
   },
   "grid": {
-    "dx_fm": 0.2
+    "dx_fm": 0.2,
+    "boundary": "periodic"
   },
   "shasta": {
     "antidiffusion": "phoenical",

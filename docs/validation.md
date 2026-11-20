@@ -24,6 +24,56 @@ Notes
 * The `macos-14` runner image is no longer offered by GitHub Actions; CI uses `macos-latest`.
 * The `spf_info` reduction is a smoke test of the backend, not a benchmark. Benchmarks are part of WP3g.
 
+## WP1 - SHASTA and the 1D relativistic solver (2026-11-20)
+
+Code: `include/spf/shasta.hpp`, `include/spf/hydro1d.hpp`; tests `tests/test_shasta.cpp`, `tests/test_hydro1d.cpp`
+(each test prints its numbers with the prefix `[WP1]`; run `spf_tests` to see them). Scheme: `docs/equations.md`.
+Numbers below are from the macOS arm64 build, Serial backend (the OpenMP build gives identical values, see T1.5).
+Setup of the shock tube: box 100 fm, discontinuity at 50 fm, t = 40 fm, outflow boundaries, `p = eps/3`,
+`eps` = 10 | 1 GeV/fm^3, `rho` = 1 | 0.5 fm^-3. Exact solution: `eps* = 3.1398315582`, `v* = 0.4633814654`,
+`V_shock = 0.7521153854`, fan tail at `zeta = -0.1555959083`. L1 = sum |eps_num - eps_exact(cell centre)| dx in GeV/fm^2.
+
+| Test | Quantity | Measured | Tolerance | Result |
+|---|---|---|---|---|
+| T1.1 square, 100/200/400 cells | relative change of grid sum | 0 / 5.3e-16 / 9.8e-15 | 1e-12 | pass |
+| T1.1 square | max, min after one crossing | 1 -> 1, 0 -> 0 | no new extrema, 1e-12 | pass |
+| T1.1 Gaussian, 100/200/400 cells | relative change of grid sum | 4.3e-16 / 4.3e-16 / 7.1e-16 | 1e-12 | pass |
+| T1.1 Gaussian | max / min never exceeded (all three resolutions) | max 0.99501 / 0.99875 / 0.99969 unchanged; min 5.2e-22 / 3.2e-22 / 2.5e-22 unchanged | 1e-12 | pass |
+| T1.1 Gaussian (sigma = 0.05 L) | L1 error at 100 / 200 / 400 cells | 7.156e-3 / 1.929e-3 / 5.333e-4 | monotonic decrease | pass |
+| T1.1 Gaussian | measured order 100->200, 200->400 | 1.89, 1.86 | reported | - |
+| T1.1 square | L1 at 100 / 200 / 400 cells (reported) | 3.03e-2 / 1.86e-2 / 1.15e-2 | reported | - |
+| T1.2 shock tube | L1 error at 200 / 400 / 800 cells | 3.1445 / 1.5925 / 0.81574 | monotonic decrease | pass |
+| T1.2 | measured order 200->400, 400->800 | 0.981, 0.965 | reported | - |
+| T1.2 | relative change of total E (200/400/800) | 8.3e-16 / 0 / 1.2e-15 | 1e-11 | pass |
+| T1.2 | relative change of total R (200/400/800) | 9.5e-16 / 9.5e-16 / 1.9e-16 | 1e-11 | pass |
+| T1.2 | recovery failures; cells with E < abs(M); clamp events | 0; 0; 0 | none | pass |
+| exact solution check | Rankine-Hugoniot residuals | 4.9e-16, 2.5e-16 | 1e-12 | pass |
+| primitive recovery round trip | 96 states (v up to 0.999, eps 1e-6 .. 50) | 0 failures, worst combined error 4.4e-11 | 1e-9 | pass |
+| T1.3 phoenical | L1 of T^00 over -2<=zeta<=3 (relative to int T^00) | 2.075e-2 (1.04%) | reported | - |
+| T1.3 phoenical | L1 of local eps (relative) | 1.850e-2 (1.04%) | reported | - |
+| T1.3 explicit | L1 of T^00 (relative) | 2.226e-2 (1.11%) | reported | - |
+| T1.3 explicit | L1 of local eps (relative) | 1.907e-2 (1.07%) | reported | - |
+| T1.3 phoenical / explicit | int T^00 dzeta at zeta>1 (fraction of int over -1..1); max E there | 9.52e-4 (9.5e-4); 2.7e-2 / 1.05e-3 (1.1e-3); 2.9e-2 (eps0 = 1) | reported | - |
+| T1.3 both | recovery failures; cells with E < abs(M) at the end | 0; 0 | none | pass |
+| T1.3 | times the E >= abs(M) restriction acted (100 steps, 2 sub-steps each) | 200 (phoenical), 199 (explicit) | reported | - |
+| T1.4 shock tube L1 at 400 cells, phoenical, eta 0.125, lambda 0.4 / 0.2 | | 1.5925 / 1.9194 | runs, selectable | pass |
+| T1.4 phoenical, eta 0.1, lambda 0.4 / 0.2 | | 3.7501 / 5.8571 | | pass |
+| T1.4 explicit, eta 0.125, lambda 0.4 / 0.2 | | 1.8014 / 2.1596 | | pass |
+| T1.4 explicit, eta 0.1, lambda 0.4 / 0.2 | | 3.8306 / 5.9734 | | pass |
+| T1.5 Serial vs OpenMP (16 threads), 400 cells | max relative deviation of eps, rho, v (vs max abs v) | 0, 0, 0 (profile files byte-identical) | 1e-12 | pass |
+
+Notes
+
+* The T1.2 order is close to 1 because the error is dominated by the fan (about 76% of the L1 error at 400 cells lies between the
+  fan head and tail: 1.207 of 1.5925) and by the shock layer (0.25); the plateau region contributes 0.13. The profile follows the
+  exact solution qualitatively (checked by plot).
+* Reducing `eta_ad` from 0.125 to 0.1 or `lambda` from 0.4 to 0.2 increases the T1.2 error (more residual numerical diffusion).
+* T1.3 has no acceptance bound in the work-package brief; the test only carries a loose regression guard (relative L1 < 10%, acausal
+  fraction < 5%). The explicit and phoenical results are close; in this test the phoenical variant is slightly better.
+* The `E >= abs(M)` restriction acts in the vacuum front of T1.3 (about 2 cells per step); it never acts in T1.1 or T1.2.
+* The reference file `tests/data/shock400_reference.csv` was written by the Serial build of this branch
+  (`SPF_WRITE_REFERENCE=1 spf_tests -tc="T1.5*"`); it checks that other builds reproduce it.
+
 ## WP2a - equation-of-state interface and analytic equations of state (2026-11-20)
 
 Test source: `tests/test_eos.cpp` (doctest, inside `spf_tests`; 18 cases / 148 assertions with the existing ones). Every compared value is
