@@ -65,6 +65,7 @@ int main(int argc, char** argv) {
         const std::string eos = argv[2];
         const long steps = std::atol(argv[3]);
         spf::Config cfg = spf::Config::from_file(SPF_DEFAULT_CONFIG);
+        cfg.set_from_string("gradient.form=off");  // benchmark of the ideal-fluid solver; pass gradient.form=paper_pressure to include the term
         for (int a = 4; a < argc; ++a) {
           const std::string s = argv[a];
           if (s.find('=') != std::string::npos && s.rfind("--", 0) != 0) cfg.set_from_string(s);

@@ -200,3 +200,76 @@ a cell where it fails is flagged.
 `Hydro3D::write_snapshot(base, fields, config)` writes `<base>.bin` (raw little-endian float64, the requested fields concatenated, each in C order
 `[ix][iy][iz]`, interior cells only) and `<base>.json` (shape, `dx_fm`, `time_fm`, `step`, field names with byte offsets, configuration echo).
 Fields: `R Mx My Mz E eps rho vx vy vz p`. Host mirror copies are made only there.
+
+## 10. Finite-range (gradient) pressure and linear analysis (`include/spf/gradient.hpp`, WP4)
+
+Source: Steinheimer and Randrup, PRL 109, 212301 (2012), arXiv:1209.2462, Eq. 1; PRC 87, 054903 (2013), arXiv:1302.2956, Sect. III, Eqs. 4, 9-11.
+The pressure of the fluid is
+
+    p = p0(eps, rho) + p_grad,    p_grad = - a^2 (eps_s / rho_s^2) rho Lap(rho),
+
+`rho` the net baryon density in the local rest frame, `eps_s = m_N rho_s`, so that the prefactor is `C = a^2 eps_s / rho_s^2 = a^2 m_N / rho_s`.
+`p` replaces the pressure in the conserved-field definitions and in the fluxes (`gradient.in_primitive_recovery = lagged`, below). The Laplacian
+is the 7-point second-order stencil `(sum of the six neighbours - 6 rho)/dx^2`, or with `gradient.stencil = fourth_order` the 13-point stencil
+`sum over axes of (-rho_{+2} + 16 rho_{+1} - 30 rho + 16 rho_{-1} - rho_{-2}) / (12 dx^2)`. Ghost width: 1 cell (second order) or 2 cells (fourth order);
+the grid carries `kShastaGhost = 3` (`static_assert` in `gradient.hpp`). Truncation errors on a harmonic density: `(k dx)^2/12` and `(k dx)^4/90`
+(test T4.0: 8.2e-3 and 1.07e-4 at `k dx = 0.314`).
+
+### Where p_grad is refreshed (`Hydro3D::sweep`)
+
+The recovery of section 8 holds `p_extra` fixed. The solver writes `p_grad` into `p_extra` (interior and the ghost layers along the sweep direction) from
+the field `rho_rf`, the rest-frame density written by the most recent recovery inside a sweep (`Recover3K` stores the recovered `rho`; `update_primitives()`
+does not, so diagnostics do not change the solution). Sequence of a sweep along `i`, with the gradient term on:
+
+1. fill the ghost layers of `U` along `i`;
+2. **refresh `p_grad`** from `rho_rf` of the previous recovery (the half-step state of the previous sweep; at the very first sweep the initial density given to `set_state_fn`,
+   or a recovery of `U` made by `init_rho_rf()`); this involves ghost-filling `rho_rf` in all three directions (the Laplacian needs transverse neighbours) and
+   filling the ghost layers of `p_extra` along `i`;
+3. recover `p, v_i, p v_i` of `U` (this writes `rho_rf` from `U`);
+4. half step, clamp, ghost fill of `U^{1/2}`;
+5. **refresh `p_grad`** from `rho_rf` of step 3 (density of `U`);
+6. recover from `U^{1/2}` (this writes `rho_rf` from `U^{1/2}`); full step.
+
+So `p_grad` is lagged by one recovery at both refresh points. The alternative `gradient.half_step_refresh = midpoint` adds, after step 6, a second refresh from the
+density of `U^{1/2}` and a second recovery of `U^{1/2}`, so that the full-step force is evaluated at the half-step density (one extra recovery per sweep;
+the recovery-failure counter then counts both recoveries). Default `lagged`.
+
+### Two couplings (`gradient.in_primitive_recovery`)
+
+* `lagged` (default): `p0 + p_grad` is the pressure in the recovery (`E = (eps + p) gamma^2 - p`, `M = (eps + p) gamma^2 v` with the total `p`) and in the fluxes
+  (`f = p` for `M_i`, `f = p v_i` for `E`). This is consistent with the conserved-field definitions: `T^{mu nu}` has the ideal-fluid form with the total pressure, so
+  `(R, M, E)` and `(eps, rho, v)` are related by one set of formulae in the initial state, the recovery and the flux. (At rest `E = eps`, so `set_state` is unaffected by
+  the missing initial `p_grad`; for a moving initial state the conserved fields are built with `p0` only, as the hook starts at zero.)
+* `force_only`: the recovery uses `p0` alone, `p_grad` enters only the source terms `f = p0 + p_grad` (`M_i`) and `f = (p0 + p_grad) v_i` (`E`). The conserved fields are
+  then those of the pressure `p0`, and `p_grad` acts as an external force; the totals `R, M, E` are conserved in either variant because both are in flux form.
+
+The two variants differ by 6e-8 (relative) in the growth rates of T4.1 (the background is uniform: `p_grad` is a first-order quantity).
+
+### Linear analysis around uniform matter (rest frame, ideal fluid, one dimension)
+
+`d_t rho = - rho d_x v`, `d_t eps = - h d_x v`, `h d_t v = - d_x p`, `h = eps + p0`, with `p = p0(eps, rho) - C rho d_x^2 rho` (the correction to `h` from `p_grad` is of second order).
+Linearising: `d_t delta_rho = - rho d_x v`, `h d_t v = - d_x delta_p`, `delta_p = (dp0/deps) delta_eps + (dp0/drho) delta_rho - C rho0 d_x^2 delta_rho`.
+For an isentropic perturbation `delta_eps = (h/rho) delta_rho` (the combination `delta_eps - (h/rho) delta_rho` is the entropy-per-baryon mode, which does not propagate):
+`delta_p0 = (h/rho) (dp0/deps + (rho/h) dp0/drho) delta_rho = (h/rho) v_s^2 delta_rho`. Hence
+
+    d_t^2 delta_rho = v_s^2 d_x^2 delta_rho - (C rho0^2 / h) d_x^4 delta_rho,
+    omega^2 = v_s^2 k^2 + (C rho0^2 / h) k^4 = v_s^2 k^2 + a^2 (eps_s / h) (rho0 / rho_s)^2 k^4.
+
+This is Eq. 9 of arXiv:1302.2956 (read in the published version, PRC 87, 054903: `gamma_k = [|v_s|^2 k^2 - a^2 (eps_s/h)(rho^2/rho_s^2) k^4]^{1/2}`); the pressure is its Eq. 4,
+the tension its Eq. 8, and the harmonic initial state and the `cosh` form are its Eqs. 10 and 11. The matching gradient energy is not part of this package (plan WP9, `korteweg_full`).
+For `v_s^2 < 0` the modes with `omega^2 < 0` grow as `exp(gamma t)`, `gamma = sqrt(|v_s|^2 k^2 - B k^4)`,
+`B = a^2 (eps_s/h)(rho0/rho_s)^2`, with the maximum at `k_max^2 = |v_s|^2 / (2B)`, `gamma_max = |v_s|^2 / (2 sqrt(B))`, and the cut-off `k_c^2 = |v_s|^2 / B`. With initial `v = 0`
+the solution is `delta_rho(t) = delta_rho(0) cosh(gamma t)` (unstable) or `cos(omega t)` (stable); these are the fit functions of `spf_growth`.
+For `v_s^2 = -0.05428`, `h = 1.9884 GeV/fm^3`, `rho0 = 5.8 rho_s`: `B = 0.002650 fm^2` at `a = 0.033 fm`, which gives `gamma_max = 0.527` at `k = 3.20 fm^-1` and `k_c = 4.53 fm^-1` for `a = 0.033 fm`.
+
+On the grid the second-order Laplacian replaces `k^2` by `(2/dx)^2 sin^2(k dx/2)`, so that the discrete cut-off along an axis is `(2/dx) asin(k_c dx / 2)`, 3.6 % above `k_c`
+at `dx = 0.2 fm` and `a = 0.033 fm`.
+
+The paper states that the numerical `gamma_k` for `a = 0` falls below `|v_s| k` because of the SHASTA scheme, that halving `dx` doubles `gamma_k` (`gamma_{2k}[dx/2] = 2 gamma_k[dx]`),
+and that at `dx = 0.2 fm` the gradient-free rates are reliable only up to about 4 fm^-1; tests T4.3 and T4.4 check the same statements.
+
+### Interface tension (arXiv:1302.2956, Eq. 8)
+
+For the cold curve at `T = 0` (`f = eps_c`), `sigma_0 = a Integral sqrt(2 eps_s Delta f(c)) dc` with `c = rho / rho_s` between the coexistence densities `rho_1, rho_2` and
+`Delta f = eps_c(rho) - [eps_c(rho_1) + mu_coex (rho - rho_1)]` (the Maxwell line). Test T4.7 evaluates it with the Hermite interpolant of `data/eos/cold_curve.dat`
+(Simpson rule, 20001 points).

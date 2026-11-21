@@ -26,6 +26,7 @@ Config default_config() { return Config::from_file(SPF_DEFAULT_CONFIG); }
 
 Hydro3DParams params_for(int nx, int ny, int nz, Real dx, const char* order, Boundary bc = Boundary::Periodic) {
   Config cfg = default_config();
+  cfg.set_from_string("gradient.form=off");  // the WP3 tests are for the solver without the finite-range term (WP4 has its own tests)
   cfg.set_from_string(std::string("shasta.sweep_order=") + order);
   Hydro3DParams hp = Hydro3DParams::from_config(cfg);
   hp.nx = nx; hp.ny = ny; hp.nz = nz; hp.dx = dx;

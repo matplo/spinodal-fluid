@@ -37,6 +37,10 @@ target_compile_definitions(spf_bench PRIVATE SPF_SOURCE_DIR="${CMAKE_CURRENT_SOU
 add_executable(spf_compare apps/spf_compare.cpp)
 target_link_libraries(spf_compare PRIVATE spf)
 
+add_executable(spf_growth apps/spf_growth.cpp)
+target_link_libraries(spf_growth PRIVATE spf)
+target_compile_definitions(spf_growth PRIVATE SPF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
 if(SPF_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
