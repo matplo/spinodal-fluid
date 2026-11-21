@@ -247,7 +247,7 @@ i.e. before the fix above. The GPU numbers below were measured by the reviewer.
 
 | Test | Quantity | Measured | Tolerance | Result |
 |---|---|---|---|---|
-| G1 | `cuda-turing75`, `spf_tests` | 34 cases run, 33 passed, 1 crashed (T3.4: host call of `eos.p0`, see above), 11 skipped after the crash | all pass | **fail before the fix** (rerun required) |
+| G1 | `cuda-turing75`, `spf_tests` | before the fix: 34 cases run, 33 passed, 1 crashed (T3.4: host call of `eos.p0`, see above); fixed head 602437b: 46 cases / 533 assertions passed | all pass | pass after the fix |
 | G1 | T3.2 on CUDA: rel. change of R, E; M_i/E | R 2.2e-16, E 0, M_i/E <= 2.0e-18 | 1e-11 | pass |
 | G1 | T3.3 on CUDA: octant asymmetry fixed, permuted | 1.113e-13, 2.850e-14 | 1e-10 (fixed) | pass |
 | G1 | `cpu-openmp`, 20 threads, same node | 45 cases, 513 assertions, all passed | all pass | pass |
@@ -263,8 +263,8 @@ No other process used the GPU during the timed runs (checked with `nvidia-smi`).
 |---|---|---|---|---|
 | ideal | 160^3 | 0.06518 s / 6.285e7 | 1.356 s / 3.021e6 | 5.529 s / 7.408e5 |
 | ideal | 320^3 | 0.5011 s / 6.539e7 | 10.79 s / 3.037e6 | 43.62 s / 7.513e5 |
-| cold_thermal_two_phase | 160^3 | not run (crashed, defect 1; rerun required) | 1.776 s / 2.306e6 | 12.43 s / 3.294e5 |
-| cold_thermal_two_phase | 320^3 | not run (crashed, defect 1; rerun required) | 13.97 s / 2.346e6 | 97.77 s / 3.351e5 |
+| cold_thermal_two_phase | 160^3 | 0.1077 s / 3.803e7 (fixed head 602437b) | 1.776 s / 2.306e6 | 12.43 s / 3.294e5 |
+| cold_thermal_two_phase | 320^3 | 0.8266 s / 3.964e7 (fixed head 602437b) | 13.97 s / 2.346e6 | 97.77 s / 3.351e5 |
 
 * 320^3 used 20 steps for CUDA and OpenMP and 3 steps for Serial; wall time for 150 steps is 150 times the time per step.
 * Peak GPU memory 1018 MiB (160^3) and 6424 MiB (320^3); GPU utilisation 100 % during the ideal-EoS runs.
@@ -278,4 +278,8 @@ G4 throughput criterion (160^3 and 320^3, ideal EoS, events of 150 steps):
 | 320^3 | 47.9 events/h (measured) | estimate from one Serial process, ignoring contention: at most 1.10 events/h, because only 2 processes of 8.27 GiB fit in 31 GB; OpenMP-20: 2.22 events/h | >= 21.6 against OpenMP-20 |
 
 Conclusion: on the GPU node the GPU is the production backend for both grid sizes; the criterion of the plan (events per hour of one GPU >= events per hour of the 20 cores)
-is met by a factor of about 22 for the ideal EoS. The cold_thermal_two_phase benchmark on CUDA remains to be measured on the fixed head. No default (preset, `run.backend`) was changed.
+is met by a factor of about 22 for the ideal EoS and about 16.5 for `cold_thermal_two_phase` (160^3: 222.8 events/h on the GPU vs 13.5 events/h with OpenMP-20). No default (preset, `run.backend`) was changed.
+
+Rerun on the fixed head 602437b (GPU node, Release `cuda-turing75`): `spf_tests` 46 cases / 533 assertions passed, `ctest` 2/2 (including the set_state regression test
+with `EosColdThermal` and `EosTable`). G2 Serial vs CUDA: worst max|a-b|/max|field| 1.647e-14, totals <= 1.736e-14 -> PASS (per-cell relative, information only: 5.8e-10).
+Ideal EoS CUDA timings reproduced: 0.06566 s (160^3), 0.5056 s (320^3) per step. Conservation in the benchmark runs: relative change <= 1.9e-16.
