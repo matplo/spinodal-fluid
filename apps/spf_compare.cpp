@@ -1,8 +1,10 @@
 // Backend comparison of the T3.2 state (WP3g, G2).
 //   spf_compare write <basename> [steps=100]   run the T3.2 smooth random 48^3 state with default parameters and write a snapshot
 //                                              (R Mx My Mz E eps rho vx vy vz p) plus <basename>_totals.json
-//   spf_compare diff <baseA> <baseB> [E_min=1e-6]   per-field deviation between two snapshots on cells with E > E_min:
-//                                              max |a-b| / max(|a|,|b|) per cell, and max |a-b| / max|field|; totals deviation
+//   spf_compare diff <baseA> <baseB> [E_min=1e-6]   per-field deviation between two snapshots on cells with E > E_min.
+//                                              Pass criterion: max |a-b| / max|field| <= 1e-11 for every field and totals <= 1e-11
+//                                              (per-cell relative deviations are printed for information only: they blow up where
+//                                              a momentum or velocity component passes through zero).
 #include "spf/eos/eos.hpp"
 #include "spf/hydro3d.hpp"
 
@@ -62,7 +64,7 @@ int diff_mode(const std::string& a, const std::string& b, double e_min) {
   for (size_t i = 0; i < A[iE].size(); ++i)
     if (A[iE][i] > e_min && B[iE][i] > e_min) ++ncell;
   std::printf("cells with E > %.1e in both snapshots: %zu of %zu\n", e_min, ncell, A[iE].size());
-  double worst = 0.0;
+  double worst = 0.0, worst_cell = 0.0;
   for (size_t f = 0; f < A.size(); ++f) {
     double rel_cell = 0.0, rel_norm = 0.0, fmax = 0.0;
     for (size_t i = 0; i < A[f].size(); ++i) {
@@ -75,7 +77,8 @@ int diff_mode(const std::string& a, const std::string& b, double e_min) {
     rel_norm /= fmax;
     std::printf("field %-4s max per-cell relative deviation %.3e   max |a-b| / max|field| %.3e\n", sa.at("fields")[f].at("name").get<std::string>().c_str(),
                 rel_cell, rel_norm);
-    worst = std::fmax(worst, rel_cell);
+    worst = std::fmax(worst, rel_norm);
+    worst_cell = std::fmax(worst_cell, rel_cell);
   }
   std::ifstream ta(a + "_totals.json"), tb(b + "_totals.json");
   const nlohmann::json ja = nlohmann::json::parse(ta), jb = nlohmann::json::parse(tb);
@@ -91,7 +94,7 @@ int diff_mode(const std::string& a, const std::string& b, double e_min) {
     std::printf("total %-2s deviation relative to total E %.3e\n", k, d);
     wt = std::fmax(wt, d);
   }
-  std::printf("worst per-cell relative deviation %.3e, worst totals deviation %.3e -> %s (limit 1e-11)\n", worst, wt,
+  std::printf("worst max|a-b|/max|field| %.3e, worst totals deviation %.3e (per-cell relative, information only: %.3e) -> %s (limit 1e-11)\n", worst, wt, worst_cell,
               (worst < 1e-11 && wt < 1e-11) ? "PASS" : "FAIL");
   return (worst < 1e-11 && wt < 1e-11) ? 0 : 3;
 }

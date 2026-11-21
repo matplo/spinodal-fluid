@@ -109,21 +109,43 @@ VacuumRun run_vacuum(const ShastaParams& prm_in) {
 
 }  // namespace
 
+namespace {
+// Round trip (eps, rho, v) -> (R, M, E) -> (eps, rho, v) evaluated in a kernel: the EoS is a device function (device_rules.md, rule 9).
+struct RoundTripK {
+  TestEosIdeal eos;
+  Kokkos::View<Real*> in, out;  // in: 3 values per state; out: 3 recovered values + failure flag
+  KOKKOS_INLINE_FUNCTION void operator()(const int s) const {
+    const Real v = in(3 * s), eps = in(3 * s + 1), rho = in(3 * s + 2);
+    const Real p = eos.p0(eps, rho), g2 = 1.0 / (1.0 - v * v), g = Kokkos::sqrt(g2);
+    const Real R = g * rho, M = (eps + p) * g2 * v, E = (eps + p) * g2 - p;
+    Real e2, r2, v2, p2;
+    const int fl = recover_primitives(eos, R, M, E, 1e-12, e2, r2, v2, p2);
+    out(4 * s) = e2; out(4 * s + 1) = r2; out(4 * s + 2) = v2; out(4 * s + 3) = fl;
+  }
+};
+}  // namespace
+
 TEST_CASE("primitive recovery: round trip (eps, rho, v) -> (R, M, E) -> (eps, rho, v)") {
-  const TestEosIdeal eos;
-  Real worst = 0.0;
-  int nfail = 0, n = 0;
+  std::vector<Real> st;
   for (Real v : {0.0, 1e-6, 0.1, 0.5, 0.9, 0.99, 0.999, -0.7})
     for (Real eps : {1e-6, 1e-2, 1.0, 50.0})
-      for (Real rho : {0.0, 0.3, 4.0}) {
-        const Real p = eos.p0(eps, rho), g2 = 1.0 / (1.0 - v * v), g = std::sqrt(g2);
-        const Real R = g * rho, M = (eps + p) * g2 * v, E = (eps + p) * g2 - p;
-        Real e2, r2, v2, p2;
-        nfail += recover_primitives(eos, R, M, E, 1e-12, e2, r2, v2, p2);
-        const Real err = std::fabs(e2 - eps) / eps + std::fabs(r2 - rho) / std::fmax(rho, 1e-12) + std::fabs(v2 - v);
-        if (err > worst) worst = err;
-        ++n;
-      }
+      for (Real rho : {0.0, 0.3, 4.0}) { st.push_back(v); st.push_back(eps); st.push_back(rho); }
+  const int n = static_cast<int>(st.size() / 3);
+  Kokkos::View<Real*> in("rt_in", 3 * n), out("rt_out", 4 * n);
+  auto hin = Kokkos::create_mirror_view(in);
+  for (size_t i = 0; i < st.size(); ++i) hin(i) = st[i];
+  Kokkos::deep_copy(in, hin);
+  Kokkos::parallel_for("rt", Kokkos::RangePolicy<ExecSpace>(0, n), RoundTripK{TestEosIdeal{}, in, out});
+  auto hout = Kokkos::create_mirror_view(out);
+  Kokkos::deep_copy(hout, out);
+  Real worst = 0.0;
+  int nfail = 0;
+  for (int s = 0; s < n; ++s) {
+    const Real v = st[3 * s], eps = st[3 * s + 1], rho = st[3 * s + 2];
+    nfail += static_cast<int>(hout(4 * s + 3));
+    const Real err = std::fabs(hout(4 * s) - eps) / eps + std::fabs(hout(4 * s + 1) - rho) / std::fmax(rho, 1e-12) + std::fabs(hout(4 * s + 2) - v);
+    if (err > worst) worst = err;
+  }
   std::printf("[WP1] primitive recovery round trip: %d states, failures %d, worst combined error %.3e\n", n, nfail, worst);
   CHECK(nfail == 0);
   CHECK(worst < 1e-9);

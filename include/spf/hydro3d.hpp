@@ -168,6 +168,28 @@ struct PrimOutK {
   }
 };
 
+// Conserved fields from primitives of one cell; eps <= 0 is a vacuum cell. Device function: calls eos.p0.
+template <class EoS>
+struct ConsFromPrim3K {
+  EoS eos;
+  Field3 eps, rho, vx, vy, vz, R, Mx, My, Mz, E;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
+    const Real e = eps(i, j, k), r = rho(i, j, k);
+    if (e <= 0.0) return;  // U was zeroed
+    const Real ux = vx(i, j, k), uy = vy(i, j, k), uz = vz(i, j, k);
+    const Real pr = eos.p0(e, r);
+    const Real v2 = ux * ux + uy * uy + uz * uz;
+    const Real gam2 = 1.0 / (1.0 - v2);
+    const Real gam = Kokkos::sqrt(gam2);
+    const Real w = (e + pr) * gam2;
+    R(i, j, k) = gam * r;
+    Mx(i, j, k) = w * ux;
+    My(i, j, k) = w * uy;
+    Mz(i, j, k) = w * uz;
+    E(i, j, k) = w - pr;
+  }
+};
+
 struct CountFail3K {
   Kokkos::View<int***> fail;
   KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, long& acc) const { acc += fail(i, j, k); }
@@ -250,11 +272,13 @@ class Hydro3D {
   }
 
   // f(ix, iy, iz, eps, rho, vx, vy, vz) fills the local-rest-frame values of interior cell (ix, iy, iz). eps <= 0: vacuum cell.
+  // The host only stages the primitive values; the conserved fields are computed in a kernel because eos.p0 is a device
+  // function (docs/device_rules.md, rule 9). Uh[0..4] serve as device staging for (eps, rho, vx, vy, vz).
   template <class F>
   void set_state_fn(F&& f) {
     Field3Host h[5];
     for (int c = 0; c < 5; ++c) {
-      h[c] = Kokkos::create_mirror_view(U[c]);
+      h[c] = Kokkos::create_mirror_view(Uh[c]);
       Kokkos::deep_copy(h[c], 0.0);
     }
     const int gx = grid.g[0], gy = grid.g[1], gz = grid.g[2];
@@ -263,19 +287,19 @@ class Hydro3D {
         for (int iz = 0; iz < grid.n[2]; ++iz) {
           Real e = 0, r = 0, ux = 0, uy = 0, uz = 0;
           f(ix, iy, iz, e, r, ux, uy, uz);
-          if (e <= 0.0) continue;
-          const Real pr = eos.p0(e, r);  // p_extra of the initial state is not included: the hook starts at zero
-          const Real v2 = ux * ux + uy * uy + uz * uz;
-          const Real gam2 = 1.0 / (1.0 - v2);
-          const Real gam = Kokkos::sqrt(gam2);
-          const Real w = (e + pr) * gam2;
-          h[0](gx + ix, gy + iy, gz + iz) = gam * r;
-          h[1](gx + ix, gy + iy, gz + iz) = w * ux;
-          h[2](gx + ix, gy + iy, gz + iz) = w * uy;
-          h[3](gx + ix, gy + iy, gz + iz) = w * uz;
-          h[4](gx + ix, gy + iy, gz + iz) = w - pr;
+          h[0](gx + ix, gy + iy, gz + iz) = e;
+          h[1](gx + ix, gy + iy, gz + iz) = r;
+          h[2](gx + ix, gy + iy, gz + iz) = ux;
+          h[3](gx + ix, gy + iy, gz + iz) = uy;
+          h[4](gx + ix, gy + iy, gz + iz) = uz;
         }
-    for (int c = 0; c < 5; ++c) Kokkos::deep_copy(U[c], h[c]);
+    for (int c = 0; c < 5; ++c) {
+      Kokkos::deep_copy(Uh[c], h[c]);
+      Kokkos::deep_copy(U[c], 0.0);
+    }
+    // p_extra of the initial state is not included: the hook starts at zero
+    Kokkos::parallel_for("hydro3d_cons_from_prim", interior_policy(grid),
+                         detail::ConsFromPrim3K<EoS>{eos, Uh[0], Uh[1], Uh[2], Uh[3], Uh[4], U[0], U[1], U[2], U[3], U[4]});
     time = 0.0;
     steps = 0;
   }

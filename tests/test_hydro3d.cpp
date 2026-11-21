@@ -4,6 +4,7 @@
 
 #include "spf/config.hpp"
 #include "spf/eos/eos.hpp"
+#include "spf/eos/table.hpp"
 #include "spf/hydro1d.hpp"
 #include "spf/hydro3d.hpp"
 #include "test_eos_ideal.hpp"
@@ -133,22 +134,51 @@ TEST_CASE("T3.1 1D shock tube and vacuum expansion embedded along x, y, z reprod
   }
 }
 
+namespace {
+// Round trip with p_extra evaluated in a kernel: the EoS is a device function (device_rules.md, rule 9).
+struct RoundTripPexK {
+  EosIdeal eos;
+  Kokkos::View<Real*> in, out;  // in: v, eps, pex per state (rho fixed); out: eps, rho, c, p, p_true, fail
+  Real rho;
+  KOKKOS_INLINE_FUNCTION void operator()(const int s) const {
+    const Real v = in(3 * s), eps = in(3 * s + 1), pex = in(3 * s + 2);
+    const Real p = eos.p0(eps, rho) + pex;
+    const Real g2 = 1.0 / (1.0 - v * v), g = Kokkos::sqrt(g2);
+    const Real R = g * rho, M = (eps + p) * g2 * v, E = (eps + p) * g2 - p;
+    Real e2, r2, c2, p2;
+    const int fl = recover_core(eos, R, Kokkos::fabs(M), E, 1e-12, pex, e2, r2, c2, p2);
+    out(6 * s) = e2; out(6 * s + 1) = r2; out(6 * s + 2) = c2; out(6 * s + 3) = p2; out(6 * s + 4) = p; out(6 * s + 5) = fl;
+  }
+};
+}  // namespace
+
 TEST_CASE("recovery with an additive extra pressure: round trip") {
-  const EosIdeal eos;
-  Real worst = 0.0;
-  int nfail = 0, n = 0;
+  const Real rho = 0.3;
+  std::vector<Real> st;
   for (Real v : {0.0, 0.1, 0.5, 0.9, 0.99})
     for (Real eps : {1e-2, 1.0, 50.0})
       for (Real pex : {-0.01, 0.0, 0.3, 5.0}) {
-        const Real rho = 0.3, p = eos.p0(eps, rho) + pex;
+        const Real p = eps / 3.0 + pex;
         if (p < 0.0 && eps + p <= 0.0) continue;
-        const Real g2 = 1.0 / (1.0 - v * v), g = std::sqrt(g2);
-        const Real R = g * rho, M = (eps + p) * g2 * v, E = (eps + p) * g2 - p;
-        Real e2, r2, c2, p2;
-        nfail += recover_core(eos, R, std::fabs(M), E, 1e-12, pex, e2, r2, c2, p2);
-        worst = std::fmax(worst, std::fabs(e2 - eps) / eps + std::fabs(r2 - rho) / rho + std::fabs(c2 - v) + std::fabs(p2 - p) / (std::fabs(p) + 1e-12));
-        ++n;
+        st.push_back(v); st.push_back(eps); st.push_back(pex);
       }
+  const int n = static_cast<int>(st.size() / 3);
+  Kokkos::View<Real*> in("rtp_in", 3 * n), out("rtp_out", 6 * n);
+  auto hin = Kokkos::create_mirror_view(in);
+  for (size_t i = 0; i < st.size(); ++i) hin(i) = st[i];
+  Kokkos::deep_copy(in, hin);
+  Kokkos::parallel_for("rtp", Kokkos::RangePolicy<ExecSpace>(0, n), RoundTripPexK{EosIdeal{}, in, out, rho});
+  auto hout = Kokkos::create_mirror_view(out);
+  Kokkos::deep_copy(hout, out);
+  Real worst = 0.0;
+  int nfail = 0;
+  for (int s = 0; s < n; ++s) {
+    const Real v = st[3 * s], eps = st[3 * s + 1];
+    nfail += static_cast<int>(hout(6 * s + 5));
+    const Real p = hout(6 * s + 4);
+    worst = std::fmax(worst, std::fabs(hout(6 * s) - eps) / eps + std::fabs(hout(6 * s + 1) - rho) / rho + std::fabs(hout(6 * s + 2) - v) +
+                                 std::fabs(hout(6 * s + 3) - p) / (std::fabs(p) + 1e-12));
+  }
   std::printf("[WP3] recovery with p_extra: %d states, failures %d, worst combined error %.3e\n", n, nfail, worst);
   CHECK(nfail == 0);
   CHECK(worst < 1e-9);
@@ -226,20 +256,25 @@ TEST_CASE("T3.3 spherical blast on 64^3: octant symmetry, fixed versus permuted 
   const BlastResult p = run_blast("permuted", n, nsteps, asym_perm);
   Real diff = 0.0;
   const char* names[5] = {"R", "Mx", "My", "Mz", "E"};
-  Real per_field[5];
+  Real per_field[5], l1_field[5];
   for (int c = 0; c < 5; ++c) {
-    Real fmax = 0.0, d = 0.0;
+    Real fmax = 0.0, d = 0.0, sum_d = 0.0, sum_a = 0.0;
     for (size_t i = 0; i < f.F[c].size(); ++i) {
       fmax = std::fmax(fmax, std::fabs(f.F[c][i]));
       d = std::fmax(d, std::fabs(f.F[c][i] - p.F[c][i]));
+      sum_d += std::fabs(f.F[c][i] - p.F[c][i]);
+      sum_a += std::fabs(f.F[c][i]);
     }
     per_field[c] = d / fmax;
+    l1_field[c] = sum_d / sum_a;
     diff = std::fmax(diff, per_field[c]);
   }
   std::printf("[WP3] T3.3 largest octant asymmetry (max |a - mirror(b)| / max|field|, all 7 reflections, fields R Mx My Mz E): fixed %.3e  permuted %.3e\n",
               asym_fixed, asym_perm);
   std::printf("[WP3] T3.3 largest difference fixed vs permuted (relative to max|field|): %.3e  [", diff);
   for (int c = 0; c < 5; ++c) std::printf("%s %.3e%s", names[c], per_field[c], c < 4 ? ", " : "]\n");
+  std::printf("[WP3] T3.3 L1 difference fixed vs permuted (sum |a-b| / sum |a|, fixed order as reference):  [");
+  for (int c = 0; c < 5; ++c) std::printf("%s %.3e%s", names[c], l1_field[c], c < 4 ? ", " : "]\n");
   CHECK(asym_fixed < 1e-10);
 }
 
@@ -416,6 +451,129 @@ TEST_CASE("T3.6 zero p_extra field changes nothing; a nonzero one does") {
               identical ? "yes" : "NO", dmax);
   CHECK(identical);
   CHECK(differs);
+}
+
+// ------------------------------------------------------------------ set_state with table-backed equations of state
+// Regression for the host-side eos.p0 call in set_state / set_state_fn: EosColdThermal and EosTable reach their data through device
+// pointers, so a host call dereferences device memory on the CUDA backend. The expected conserved fields are computed in a kernel.
+namespace {
+template <class EoS>
+struct ExpectedConsK {
+  EoS eos;
+  Kokkos::View<Real*> prim, out;  // prim: eps rho vx vy vz; out: R Mx My Mz E (per cell)
+  KOKKOS_INLINE_FUNCTION void operator()(const int i) const {
+    const Real e = prim(5 * i), r = prim(5 * i + 1), ux = prim(5 * i + 2), uy = prim(5 * i + 3), uz = prim(5 * i + 4);
+    for (int c = 0; c < 5; ++c) out(5 * i + c) = 0.0;
+    if (e <= 0.0) return;
+    const Real p = eos.p0(e, r);
+    const Real g = 1.0 / Kokkos::sqrt(1.0 - (ux * ux + uy * uy + uz * uz));
+    const Real w = (e + p) * g * g;
+    out(5 * i) = g * r; out(5 * i + 1) = w * ux; out(5 * i + 2) = w * uy; out(5 * i + 3) = w * uz; out(5 * i + 4) = w - p;
+  }
+};
+
+template <class EoS>
+std::vector<Real> expected_conserved(const EoS& eos, const std::vector<Real>& prim) {
+  const int n = static_cast<int>(prim.size() / 5);
+  Kokkos::View<Real*> d("exp_prim", prim.size()), o("exp_out", prim.size());
+  auto h = Kokkos::create_mirror_view(d);
+  for (size_t i = 0; i < prim.size(); ++i) h(i) = prim[i];
+  Kokkos::deep_copy(d, h);
+  Kokkos::parallel_for("expected_cons", Kokkos::RangePolicy<ExecSpace>(0, n), ExpectedConsK<EoS>{eos, d, o});
+  auto ho = Kokkos::create_mirror_view(o);
+  Kokkos::deep_copy(ho, o);
+  std::vector<Real> r(prim.size());
+  for (size_t i = 0; i < r.size(); ++i) r[i] = ho(i);
+  return r;
+}
+
+// primitive state of cell number q (some cells vacuum)
+void prim_of(int q, Real* P) {
+  const Real a = std::sin(0.7 * q + 0.3), b = std::cos(1.3 * q), c = std::sin(2.1 * q + 1.0);
+  P[0] = 1.4 + 0.6 * a;  P[1] = 0.28 + 0.1 * b;
+  P[2] = 0.17 * a; P[3] = 0.17 * b; P[4] = 0.17 * c;
+  if (q % 11 == 5) { P[0] = 0.0; P[1] = 0.0; P[2] = P[3] = P[4] = 0.0; }  // vacuum cell
+}
+
+template <class EoS>
+void check_set_state(const EoS& eos, const char* label) {
+  // ---- 3D
+  const int nx = 5, ny = 4, nz = 3;
+  Hydro3DParams hp = params_for(nx, ny, nz, 0.2, "fixed");
+  Hydro3D<EoS> h(eos, hp);
+  std::vector<Real> prim(5 * nx * ny * nz);
+  for (int ix = 0; ix < nx; ++ix)
+    for (int iy = 0; iy < ny; ++iy)
+      for (int iz = 0; iz < nz; ++iz) prim_of((ix * ny + iy) * nz + iz, &prim[5 * ((ix * ny + iy) * nz + iz)]);
+  h.set_state_fn([&](int ix, int iy, int iz, Real& e, Real& r, Real& ux, Real& uy, Real& uz) {
+    const Real* P = &prim[5 * ((ix * ny + iy) * nz + iz)];
+    e = P[0]; r = P[1]; ux = P[2]; uy = P[3]; uz = P[4];
+  });
+  const std::vector<Real> ex = expected_conserved(eos, prim);
+  Real worst3 = 0.0, scale = 0.0;
+  for (int c = 0; c < 5; ++c) {
+    const std::vector<Real> got = h.interior_copy(h.U[c]);
+    Real fmax = 0.0, d = 0.0;
+    for (size_t i = 0; i < got.size(); ++i) {
+      fmax = std::fmax(fmax, std::fabs(ex[5 * i + c]));
+      d = std::fmax(d, std::fabs(got[i] - ex[5 * i + c]));
+    }
+    worst3 = std::fmax(worst3, d / fmax);
+    scale = std::fmax(scale, fmax);
+  }
+  // ---- 1D (same primitives along x; velocity along x only)
+  const int n1 = 24;
+  std::vector<Real> e1(n1), r1(n1), v1(n1), prim1(5 * n1);
+  for (int i = 0; i < n1; ++i) {
+    Real P[5];
+    prim_of(i, P);
+    P[3] = P[4] = 0.0;
+    for (int c = 0; c < 5; ++c) prim1[5 * i + c] = P[c];
+    e1[i] = P[0]; r1[i] = P[1]; v1[i] = P[2];
+  }
+  Hydro1D<EoS> h1(eos, n1, 0.2, ShastaParams::from_config(default_config()));
+  h1.set_state(e1, r1, v1);
+  const std::vector<Real> ex1 = expected_conserved(eos, prim1);
+  Real worst1 = 0.0;
+  const int map1[3] = {0, 1, 4};  // R, M, E in the 5-component layout
+  for (int c = 0; c < 3; ++c) {
+    const std::vector<Real> got = h1.line(h1.U[c]);
+    Real fmax = 0.0, d = 0.0;
+    for (int i = 0; i < n1; ++i) {
+      fmax = std::fmax(fmax, std::fabs(ex1[5 * i + map1[c]]));
+      d = std::fmax(d, std::fabs(got[i] - ex1[5 * i + map1[c]]));
+    }
+    worst1 = std::fmax(worst1, d / fmax);
+  }
+  // ---- a short run from the state must not fail in the recovery
+  Hydro3DParams hp2 = params_for(8, 8, 8, 0.2, "permuted");
+  Hydro3D<EoS> h2(eos, hp2);
+  h2.set_state_fn([&](int ix, int iy, int iz, Real& e, Real& r, Real& ux, Real& uy, Real& uz) {
+    Real P[5];
+    prim_of((ix * 8 + iy) * 8 + iz, P);
+    if (P[0] <= 0.0) { P[0] = 1.4; P[1] = 0.28; }  // keep the smoke run free of vacuum
+    e = P[0]; r = P[1]; ux = P[2]; uy = P[3]; uz = P[4];
+  });
+  h2.run(3);
+  std::printf("[WP3] set_state with %s: 3D max |U - expected| / max|field| = %.3e, 1D %.3e (expected values computed in a kernel); 3 steps: recovery failures %ld\n",
+              label, worst3, worst1, h2.n_recover_fail_total);
+  CHECK(scale > 0.0);
+  CHECK(worst3 < 1e-13);
+  CHECK(worst1 < 1e-13);
+  CHECK(h2.n_recover_fail_total == 0);
+}
+}  // namespace
+
+TEST_CASE("set_state / set_state_fn with EosColdThermal and EosTable: conserved fields computed on the device") {
+  const ColdCurveTable table = ColdCurveTable::load(std::string(SPF_SOURCE_DIR) + "/data/eos/cold_curve.dat");
+  const EosColdThermal cold(table, ColdVariant::two_phase, 4.0 / 3.0);
+  check_set_state(cold, "EosColdThermal (two_phase)");
+  const EosColdThermal maxw(table, ColdVariant::maxwell, 4.0 / 3.0);
+  check_set_state(maxw, "EosColdThermal (maxwell)");
+  const EosTableData tab = EosTableData::load(std::string(SPF_TEST_DATA_DIR) + "/synthetic_eos");
+  check_set_state(tab.eos(), "EosTable (synthetic, bilinear)");
+  check_set_state(tab.eos(TableInterp::bicubic, false), "EosTable (synthetic, bicubic)");
+  check_set_state(EosIdeal{}, "EosIdeal");
 }
 
 // ------------------------------------------------------------------ snapshot writer, config
