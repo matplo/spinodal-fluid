@@ -204,7 +204,7 @@ TEST_CASE("T6.3 clump finder on planted blobs") {
            c.baryon[is], B_sph_cells, B_sph_analytic, c.baryon[is] / B_sph_analytic - 1.0, c.baryon[1 - is], B_gauss,
            c.baryon[1 - is] / B_gauss - 1.0);
     CHECK(std::fabs(c.baryon[is] / B_sph_cells - 1.0) <= 1e-3);
-    CHECK(std::fabs(c.baryon[is] / B_sph_analytic - 1.0) <= 3e-2);  // lattice-point count of a sphere of 15 cells radius
+    // The continuum volume 4/3 pi r^3 rho0 differs by 1.35e-2 (printed above): lattice-point count of the sphere. Information only, not an acceptance criterion.
     CHECK(std::fabs(c.baryon[1 - is] / B_gauss - 1.0) <= 1e-3);
   }
   SUBCASE("periodic wrap") {

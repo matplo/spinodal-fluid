@@ -299,7 +299,7 @@ The phase-plane histogram uses `Kokkos::atomic_add`; the moment, flow and unstab
 | T6.2 identical Gaussians (M = 2, 4), sigma = 3 dx = 0.75 fm, spacing 10 fm = 13.3 sigma, N = 2..7 | max rel. deviation from 2^(3N/2)/(N+1)^(3/2): 1.4e-9 (N = 7) / 1.4e-9 | 1e-3 | pass |
 | T6.2 different B (1, 3) and (0.5, 2, 4) with the closed form of Sect. 10 | 1.4e-9 / 1.4e-9 (worst over N) | 1e-3 | pass |
 | T6.3 cuboids, edge and corner contact | 6-connectivity: 4 clumps; 26: 2 clumps; B per clump within 1e-3 of the planted value | 1e-3 | pass |
-| T6.3 sphere (finder 28.656 = planted cell count; analytic 4/3 pi r^3 rho0 differs by 1.35e-2, lattice-point count of 15 cells radius) | planted-cell deviation 0 | 1e-3 (planted), 3e-2 (analytic) | pass |
+| T6.3 sphere (finder 28.656 = planted cell count; the continuum volume 4/3 pi r^3 rho0 differs by 1.35e-2, a lattice-point effect of a 15-cell-radius sphere; an earlier test version had a continuum-volume check with a 1e-2 bound that failed at 1.35e-2 and was widened to 3e-2; that check is now removed and the number is reported only) | planted-cell deviation 0 | 1e-3 (planted cell count); the continuum volume is information only (no criterion) | pass |
 | T6.3 Gaussian above 0.02 rho_s, truncated-Gaussian analytic value | -8.6e-6 | 1e-3 | pass |
 | T6.3 periodic wrap | 1 clump with B = 1.024 (planted 1.024) when wrapping, 2 clumps when open; a diagonal contact across the face is one clump only for 26-connectivity | exact | pass |
 | T6.4 Hubble flow v = H (x, y) on a Gaussian, H = 0.04 fm^-1, max abs(v) = 0.45 | U_perp = 0.0424264068712 = sqrt(2) H sigma; deviation 1.8e-14 (computational), 1.5e-14 (rest) / 0 | 1e-6 | pass |
