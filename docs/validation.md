@@ -179,3 +179,107 @@ Notes
 * T2c.5 compares the derivative with a centred difference of p0; for dp_drho on the conformal plasma branch (p = eps/3) the exact value is zero, so points with abs(dp_drho) < 1e-3 GeV are compared in absolute terms.
 * T2c.6 and T2c.7 differences at the 1e-16 level between CPU and GPU are rounding-level differences between the host and device floating-point code paths.
 * Reading of Steinheimer and Randrup, Phys. Rev. C 87, 054903, Sect. V C: Eqs. (17)-(19) agree with the brief (T_bc = T_0/b, mu_bc = (c/b) mu_0, p_bc = p_0/b, v_s,bc = v_s,0; entropy density s_bc = s_0(b eps, c rho), scaled critical point (eps_crit/b, rho_crit/c)). The derivative identities dp_deps_bc and dp_drho_bc follow from the chain rule and are not in the paper. The identity p = T s - eps + mu rho (hence the paper's p_bc) requires a thermodynamically consistent base; the synthetic table is not, and the wrapper applies the four rules of the brief literally.
+
+## WP3 and WP3g - 3+1D solver, GPU validation and benchmark (2026-11-21)
+
+Code: `include/spf/hydro3d.hpp` (`Hydro3D`), `src/hydro3d_io.cpp` (snapshots), `src/ic_random.cpp` (smooth random state), `apps/spf_bench.cpp`,
+`apps/spf_compare.cpp`; tests `tests/test_hydro3d.cpp` (each test prints its numbers with the prefix `[WP3]`). Scheme and the points the Rischke papers
+leave open: `docs/equations.md`, sections 7-9. Config keys added: `grid.nx`, `grid.ny`, `grid.nz` (64 each), `output.snapshot_every` (0).
+
+### CPU acceptance tests
+
+Numbers from the macOS arm64 workstation (Clang, Release), identical on `cpu-serial` and `cpu-openmp` (16 threads) unless stated.
+Default parameters (`phoenical`, `eta_ad` 0.125, `lambda` 0.4) except where stated.
+
+| Test | Quantity | Measured | Tolerance | Result |
+|---|---|---|---|---|
+| T3.1 | 1D shock tube (400 cells) and vacuum expansion (300 cells) embedded along x, y, z of a 3D grid (4 transverse cells, periodic), `fixed`; max relative deviation from `Hydro1D` | 0 for all six cases | 1e-12 | pass |
+| T3.1 | same, `permuted` (reported) | 0 for all six cases | - | reported |
+| T3.2 | periodic 48^3, smooth random state, 500 steps, `permuted`: rel. change of R, E; M_i/E_total | R 7.4e-15, E 2.5e-14; M_i/E <= 6.9e-17 (OpenMP: R 4.4e-16, E 6.9e-16) | 1e-11 | pass |
+| T3.2 | recovery failures, E < \|M\| cells, clamps | 0, 0, 0 | 0 | pass |
+| T3.3 | spherical blast, 64^3, dx = 0.2 fm, 40 steps, outflow: largest octant asymmetry, max \|a - mirror(b)\| / max\|field\| over the 7 reflections and fields R, M_i, E; `fixed` | 2.326e-14 | 1e-10 | pass |
+| T3.3 | same, `permuted` (reported) | 2.871e-14 | - | reported |
+| T3.3 | fixed vs permuted, max-norm max\|a-b\| / max\|field\|: R, Mx, My, Mz, E | 6.578e-02, 6.839e-02, 6.324e-02, 6.675e-02, 6.948e-02 | - | reported |
+| T3.3 | fixed vs permuted, L1 measure sum\|a-b\| / sum\|a\| (fixed as reference): R, Mx, My, Mz, E | 1.686e-03, 2.776e-02, 1.967e-02, 2.777e-02, 2.337e-03 | - | reported |
+| T3.4 | `EosColdThermal` two_phase, rho = 2 rho_s = 0.306 fm^-3, eps = eps_c + 0.5 eps_s = 0.361229301 GeV/fm^3, p = 0.045498074, vs2 = 0.293538362 (> 0), travelling wave, relative amplitude 1e-4, 64 x 4 x 4 cells, dx = 0.2 fm; phase velocity measured / analytic for m = 1..4 (k = 0.4909, 0.9817, 1.4726, 1.9635 fm^-1) | 0.999778, 0.999316, 0.998854, 0.996979 | within 2 % | pass |
+| T3.4 | amplitude after one period / initial, m = 1..4 | 0.9998, 0.9973, 0.9871, 0.9639 | - | reported |
+| T3.5 | smooth sound wave, p = eps/3, one wavelength, one period, 32 / 64 / 128 cells: relative L1 error of the eps fluctuation | 3.501e-02, 8.193e-03, 1.928e-03 | monotone decrease | pass |
+| T3.5 | measured order 32->64, 64->128 | 2.095, 2.087 | report if < 1.5 | pass (about 2) |
+| T3.6 | zero `p_extra` against the hook bypassed | bitwise identical | identical | pass |
+| T3.6 | nonzero `p_extra` (0.05 GeV/fm^3, sinusoidal) changes the result (sanity check) | 2.554e-01 of max\|field\| | differs | pass |
+| set_state | `EosColdThermal` (two_phase, maxwell), `EosTable` (synthetic, bilinear and bicubic), `EosIdeal`: conserved fields from `set_state_fn` (3D) and `Hydro1D::set_state` against values computed in a kernel; 3 steps without recovery failure | 3D 4.0e-16 to 6.0e-16, 1D 2.1e-16 to 4.3e-16 (relative to max\|field\|); 0 failures | 1e-13 | pass |
+| T3.7 | 96^3, 100 steps, ideal: Serial | 3.196e6 cell-updates/s | - | recorded |
+| T3.7 | 96^3, 100 steps, OpenMP 16 threads: ideal, cold_thermal_two_phase | 1.584e7, 7.243e6 cell-updates/s | - | recorded |
+
+Test totals after the review fixes (this branch merged with `main`): 46 cases, 533 assertions on `cpu-serial` and on `cpu-openmp` (16 threads); `spf_compare` Serial vs OpenMP on the workstation: 0 in every field, totals <= 1.8e-14.
+
+Notes
+
+* T3.1 is bit-identical because a sweep along a direction with a uniform state and zero velocity is the identity (`Q+ + Q- = 1` exactly, zero differences), and the
+  per-cell expressions of the 3D and the 1D solver are written identically (`|M|` as `sqrt(M_x^2 + M_y^2 + M_z^2)`, `v = c (M_i / |M|)`, `M` restored as `(M_i / |M|) E`).
+* T3.3: the fixed and permuted sweep orders differ by up to 7 % of the maximum in the shock region of the blast. The octant symmetry of each order is at the rounding level.
+* T3.4: the antidiffusion damps the wave by 3.6 % per period at k dx = 0.39; the phase velocity is within 0.3 % of the analytic value at every k.
+* T3.5: the amplitude of the wave is 1e-6 of eps (linear regime); the time step of each run is `lambda <= 0.4` adjusted so that an integer number of steps is one period.
+* The workstation and the GPU node differ: on the workstation Serial gives 3.2e6 cell-updates/s, about four times the Serial rate of the GPU node (7.4e5).
+
+### Defects found in review, and their fixes
+
+* **Host-side equation-of-state call (crashed on CUDA).** `Hydro3D::set_state_fn` and `Hydro1D::set_state` called `eos.p0(e, r)` on the host. `EosColdThermal`
+  and `EosTable` read their tables through device pointers, so the host dereferenced device memory on the CUDA backend; the CPU builds hide this because host and
+  device memory coincide. On the GPU node (before the fix) the CUDA test run had 34 cases run, 33 passed, 1 crashed (T3.4 with SIGSEGV), and `spf_bench` with
+  `cold_thermal_two_phase` failed at 160^3 and 320^3. Fix: the host fills mirrors of the primitive fields, copies them to the device, and a named functor
+  (`ConsFromPrim1K`, `ConsFromPrim3K`) computes `R, M_i, E`; `docs/device_rules.md` has a new rule 9. Every host-side call of an EoS member in the code base (include, src, apps, tests):
+  1. `include/spf/hydro3d.hpp`, `Hydro3D::set_state_fn` (fixed);
+  2. `include/spf/hydro1d.hpp`, `Hydro1D::set_state` (fixed);
+  3. `tests/test_hydro1d.cpp`, round-trip test of `recover_primitives` (host call with the ideal EoS; moved into a kernel);
+  4. `tests/test_hydro3d.cpp`, round-trip test of `recover_core` with `p_extra` (host call with the ideal EoS; moved into a kernel).
+  All other EoS member calls in `tests/test_eos.cpp`, `tests/test_eos_table.cpp`, `tests/test_hydro3d.cpp` (T3.4 probe), `include/spf/eos/scaled.hpp` and the solver
+  kernels are inside functors or kernels. `EosTable::check_range` and `ColdCurveTable::valid_range` read scalar members only and are host-callable.
+  Regression test: "set_state / set_state_fn with EosColdThermal and EosTable" (above), which fails on CUDA without the fix; it was run on the CPU backends only.
+* **Metric of the backend comparison.** `spf_compare diff` first used the per-cell relative deviation `|a-b| / max(|a|,|b|)`, which reaches 1e-9 where a momentum or velocity
+  component passes through zero although the absolute difference is at the rounding level. The pass criterion of G2 is now `max |a-b| / max|field| <= 1e-11` per field and
+  totals (R, E; M_i relative to the total E) `<= 1e-11`; the per-cell relative numbers are still printed for information.
+
+### GPU node (WP3g)
+
+Linux x86_64 node, 20 cores, 31 GB RAM, NVIDIA TITAN RTX (24 GiB), CUDA 12.9, GCC 13.4, Release presets, tree = `main` (b55ac1c) + commit 6d627da of this branch,
+i.e. before the fix above. The GPU numbers below were measured by the reviewer.
+
+| Test | Quantity | Measured | Tolerance | Result |
+|---|---|---|---|---|
+| G1 | `cuda-turing75`, `spf_tests` | before the fix: 34 cases run, 33 passed, 1 crashed (T3.4: host call of `eos.p0`, see above); fixed head 602437b: 46 cases / 533 assertions passed | all pass | pass after the fix |
+| G1 | T3.2 on CUDA: rel. change of R, E; M_i/E | R 2.2e-16, E 0, M_i/E <= 2.0e-18 | 1e-11 | pass |
+| G1 | T3.3 on CUDA: octant asymmetry fixed, permuted | 1.113e-13, 2.850e-14 | 1e-10 (fixed) | pass |
+| G1 | `cpu-openmp`, 20 threads, same node | 45 cases, 513 assertions, all passed | all pass | pass |
+| G2 | T3.2 state, 100 steps, Serial vs CUDA: max\|a-b\|/max\|field\| for R, Mx, My, Mz, E, eps, rho, vx, vy, vz, p | 1.232e-14, 1.559e-14, 1.238e-14, 1.366e-14, 4.245e-15, 4.287e-15, 1.221e-14, 1.568e-14, 1.321e-14, 1.441e-14, 4.344e-15 | 1e-11 | pass |
+| G2 | totals R, E (M_i relative to E_total <= 1.7e-14) | 6.1e-15, 1.7e-14 | 1e-11 | pass |
+| G2 | Serial vs OpenMP (20 threads) | 0 in every field; totals <= 1.8e-14 | 1e-11 | pass |
+| G2 | per-cell relative deviation, Serial vs CUDA (information only) | up to 1.027e-09 (Mz), 2.581e-10 (Mx), 1.879e-10 (My, vy) where a component is near zero | not a criterion | reported |
+
+Benchmark (`spf_bench`, periodic box, smooth random state, `permuted`, one untimed warm-up step). Time per step and cell-updates per second.
+No other process used the GPU during the timed runs (checked with `nvidia-smi`).
+
+| EoS | Grid | CUDA | OpenMP, 20 threads | Serial, 1 thread |
+|---|---|---|---|---|
+| ideal | 160^3 | 0.06518 s / 6.285e7 | 1.356 s / 3.021e6 | 5.529 s / 7.408e5 |
+| ideal | 320^3 | 0.5011 s / 6.539e7 | 10.79 s / 3.037e6 | 43.62 s / 7.513e5 |
+| cold_thermal_two_phase | 160^3 | 0.1077 s / 3.803e7 (fixed head 602437b) | 1.776 s / 2.306e6 | 12.43 s / 3.294e5 |
+| cold_thermal_two_phase | 320^3 | 0.8266 s / 3.964e7 (fixed head 602437b) | 13.97 s / 2.346e6 | 97.77 s / 3.351e5 |
+
+* 320^3 used 20 steps for CUDA and OpenMP and 3 steps for Serial; wall time for 150 steps is 150 times the time per step.
+* Peak GPU memory 1018 MiB (160^3) and 6424 MiB (320^3); GPU utilisation 100 % during the ideal-EoS runs.
+* Peak resident memory of one Serial process: 1.08 GiB (160^3), 8.27 GiB (320^3).
+
+G4 throughput criterion (160^3 and 320^3, ideal EoS, events of 150 steps):
+
+| Grid | (a) one GPU | (b) 20 cores | Ratio (a)/(b) |
+|---|---|---|---|
+| 160^3 | 368.2 events/h (3600 / (150 x 0.06518 s) taken from the table above) | 20 independent single-thread processes: 28.57 s per step each, 5.17 times slower than one process alone (memory-bandwidth bound), 16.80 events/h; OpenMP-20: 17.70 events/h | 21.9 |
+| 320^3 | 47.9 events/h (measured) | estimate from one Serial process, ignoring contention: at most 1.10 events/h, because only 2 processes of 8.27 GiB fit in 31 GB; OpenMP-20: 2.22 events/h | >= 21.6 against OpenMP-20 |
+
+Conclusion: on the GPU node the GPU is the production backend for both grid sizes; the criterion of the plan (events per hour of one GPU >= events per hour of the 20 cores)
+is met by a factor of about 22 for the ideal EoS and about 16.5 for `cold_thermal_two_phase` (160^3: 222.8 events/h on the GPU vs 13.5 events/h with OpenMP-20). No default (preset, `run.backend`) was changed.
+
+Rerun on the fixed head 602437b (GPU node, Release `cuda-turing75`): `spf_tests` 46 cases / 533 assertions passed, `ctest` 2/2 (including the set_state regression test
+with `EosColdThermal` and `EosTable`). G2 Serial vs CUDA: worst max|a-b|/max|field| 1.647e-14, totals <= 1.736e-14 -> PASS (per-cell relative, information only: 5.8e-10).
+Ideal EoS CUDA timings reproduced: 0.06566 s (160^3), 0.5056 s (320^3) per step. Conservation in the benchmark runs: relative change <= 1.9e-16.

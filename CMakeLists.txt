@@ -17,6 +17,8 @@ include(cmake/Version.cmake)
 add_library(spf
   src/config.cpp
   src/runtime_info.cpp
+  src/hydro3d_io.cpp
+  src/ic_random.cpp
 )
 target_include_directories(spf PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -27,6 +29,13 @@ target_compile_definitions(spf PUBLIC SPF_DEFAULT_CONFIG="${CMAKE_CURRENT_SOURCE
 
 add_executable(spf_info apps/spf_info.cpp)
 target_link_libraries(spf_info PRIVATE spf)
+
+add_executable(spf_bench apps/spf_bench.cpp)
+target_link_libraries(spf_bench PRIVATE spf)
+target_compile_definitions(spf_bench PRIVATE SPF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+add_executable(spf_compare apps/spf_compare.cpp)
+target_link_libraries(spf_compare PRIVATE spf)
 
 if(SPF_BUILD_TESTS)
   enable_testing()

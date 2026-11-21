@@ -18,5 +18,10 @@ also while only a CPU backend is being built. A kernel that cannot run on the de
    tolerance, never bitwise.
 7. Host-device copies (`create_mirror_view`, `deep_copy`) happen only at snapshots and at the end of a test.
 8. Double precision (`spf::Real`) throughout.
+9. Equation-of-state member functions are device functions; host code never calls them (tables are reached through device pointers).
+   Host-side conversions go through a kernel: the host fills mirrors of the primitive fields, copies them to the device, and a named
+   functor computes the derived fields (`Hydro1D::set_state`, `Hydro3D::set_state_fn`). On the CPU backends host and device memory coincide, so a
+   violation of this rule passes every CPU test and crashes only on CUDA. Scalar members that do not read table data (for instance
+   `EosTable::check_range`, `ColdCurveTable::valid_range`) are host-callable.
 
 `tests/test_kokkos.cpp` shows the pattern.
