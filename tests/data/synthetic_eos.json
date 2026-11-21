@@ -1,0 +1,39 @@
+{
+  "format": "spf_eos_table",
+  "format_version": 1,
+  "description": "SYNTHETIC TABLE FOR READER TESTS ONLY - not a physical equation of state. p0 is sampled from the analytic development EoS p0 = p_c(rho) + (Gamma_th - 1)(eps - eps_c(rho)) with Gamma_th = 1.33333333333, p_c = rho mu_c - eps_c, from data/eos/cold_curve.dat (C1 cubic Hermite interpolation of the cold curve); the formula is continued smoothly below the cold curve (no clamp). T, mu, s are smooth analytic test functions with no thermodynamic meaning: T = 0.1 GeV x/(1+y); mu = 0.94 GeV + 0.3 GeV y/(1+0.1 y) + 0.005 GeV x; s = 0.5 x (1+0.1 y)/(1+0.01 x) + 0.2 y fm^-3, with x = eps/eps_s, y = rho/rho_s. eps_min(rho) = eps_c(rho).",
+  "byte_order": "little",
+  "dtype": "float64",
+  "lattice": {
+    "rho_s_fm3": 0.153,
+    "m_N_GeV": 0.94,
+    "x0": 0.0,
+    "dx": 0.2,
+    "nx": 201,
+    "y0": 0.0,
+    "dy": 0.04,
+    "ny": 401
+  },
+  "index_order": "p0, T, mu, s: C order, shape (nx, ny), element (ix, iy) at flat index ix*ny + iy (iy fastest); eps_min: shape (ny,) indexed by iy; all float64 little-endian, fields stored consecutively in the order of 'fields'",
+  "fields": [
+    "p0",
+    "T",
+    "mu",
+    "s",
+    "eps_min"
+  ],
+  "units": {
+    "p0": "GeV/fm^3",
+    "T": "GeV",
+    "mu": "GeV",
+    "s": "fm^-3",
+    "eps_min": "GeV/fm^3"
+  },
+  "bin_size_bytes": 2582440,
+  "sha256": "25a7f7ba63f4ad81e5b31568f025edc13de0b75889e63955099822c8d66f2453",
+  "generator": {
+    "tool": "tools/eos/write_table.py synthetic",
+    "gamma_th": 1.3333333333333333,
+    "cold_curve": "data/eos/cold_curve.dat"
+  }
+}

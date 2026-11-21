@@ -3,6 +3,7 @@ add_executable(spf_tests
   test_config.cpp
   test_kokkos.cpp
   test_eos.cpp
+  test_eos_table.cpp
   test_shasta.cpp
   test_hydro1d.cpp
   test_hydro3d.cpp

@@ -10,8 +10,8 @@ Every modelling choice is a named key in `config/defaults.json` (or a build pres
 | S02 | `ic.t_init_radius_mode`, `ic.t_init_r0_fm`, `ic.t_init_radius_fm` | `r0_A13`* with r0 = 1.2 fm (R = r0 A^(1/3)) / `fixed` with R = 6.62 fm / explicit time | planned (WP5) |
 | S03 | `ic.sigma_init_fm` | 1.0* / 0.7 / 0.5 | planned (WP5) |
 | S04 | `ic.gaussian_contraction` | `undecided`* (to be fixed in WP5 from arXiv:0710.0332 and arXiv:0806.1695) / `none` | planned (WP5) |
-| S05 | `eos.model`, `eos.scale_b`, `eos.scale_c` | `table_two_phase`* / `table_maxwell` / `cold_thermal_two_phase` / `cold_thermal_maxwell` / `ideal` / `gamma_law`; b = c = 1* | analytic and cold-thermal variants done (WP2a); tables planned (WP2c) |
-| S06 | `eos.table_interpolation` | `bilinear`* / `bicubic` | planned (WP2c) |
+| S05 | `eos.model`, `eos.scale_b`, `eos.scale_c` | `table_two_phase`* / `table_maxwell` / `cold_thermal_two_phase` / `cold_thermal_maxwell` / `ideal` / `gamma_law`; b = c = 1* | analytic and cold-thermal variants done (WP2a); table reader (`table_two_phase`, `table_maxwell`) and scaled wrapper `EosScaled` implemented and tested (WP2c); physical tables planned (WP2b) |
+| S06 | `eos.table_interpolation` | `bilinear`* / `bicubic` (Hermite, centred-difference node derivatives) | implemented and tested (WP2c); `eos.extrapolate` (`false`*: clamp + `check_range`; `true`: linear extrapolation) implemented (WP2c) |
 | S07 | `gradient.form`, `gradient.a_fm` | `paper_pressure`* / `korteweg_full` / `off`; a = 0.033 fm* / 0 / 0.01 / 0.05 | planned (WP4) |
 | S08 | `gradient.in_primitive_recovery` | `lagged`* / `force_only` | planned (WP4) |
 | S09 | `shasta.antidiffusion`, `shasta.eta_ad`, `shasta.lambda`, `shasta.sweep_order`, `grid.dx_fm` | `phoenical`* / `explicit`; 0.125*; 0.4*; `permuted`* / `fixed`; 0.2 fm* / 0.1 fm | antidiffusion, eta_ad, lambda implemented and tested (WP1); `grid.boundary` (`periodic`* / `outflow`) added; sweep_order and grid.dx_fm planned (WP3) |
