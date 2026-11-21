@@ -119,6 +119,28 @@ struct CountEltMK {
 
 }  // namespace detail
 
+namespace detail {
+
+// Conserved fields from primitives (eps, rho, v) of one cell; eps <= 0 is a vacuum cell. Device function: calls eos.p0.
+template <class EoS>
+struct ConsFromPrim1K {
+  EoS eos;
+  Field3 eps, rho, v, R, M, E;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
+    const Real e = eps(i, j, k), r = rho(i, j, k), u = v(i, j, k);
+    if (e <= 0.0) return;  // U was zeroed
+    const Real pr = eos.p0(e, r);
+    const Real gam2 = 1.0 / (1.0 - u * u);
+    const Real gam = Kokkos::sqrt(gam2);
+    const Real w = (e + pr) * gam2;
+    R(i, j, k) = gam * r;
+    M(i, j, k) = w * u;
+    E(i, j, k) = w - pr;
+  }
+};
+
+}  // namespace detail
+
 template <class EoS>
 struct Hydro1D {
   EoS eos;
@@ -152,23 +174,21 @@ struct Hydro1D {
   }
 
   // Set the interior from local-rest-frame values (host vectors of length nx), then fill ghosts.
+  // The host only stages the primitive values; the conserved fields are computed in a kernel because eos.p0 is a device
+  // function (docs/device_rules.md, rule 9). Uh[0..2] serve as device staging for (eps, rho, v).
   void set_state(const std::vector<Real>& eps_h, const std::vector<Real>& rho_h, const std::vector<Real>& v_h) {
-    auto hR = Kokkos::create_mirror_view(U[0]);
-    auto hM = Kokkos::create_mirror_view(U[1]);
-    auto hE = Kokkos::create_mirror_view(U[2]);
-    Kokkos::deep_copy(hR, 0.0); Kokkos::deep_copy(hM, 0.0); Kokkos::deep_copy(hE, 0.0);
+    auto he = Kokkos::create_mirror_view(Uh[0]);
+    auto hr = Kokkos::create_mirror_view(Uh[1]);
+    auto hv = Kokkos::create_mirror_view(Uh[2]);
+    Kokkos::deep_copy(he, 0.0); Kokkos::deep_copy(hr, 0.0); Kokkos::deep_copy(hv, 0.0);
     const int g = grid.g[0];
     for (int i = 0; i < grid.n[0]; ++i) {
-      const Real e = eps_h[i], r = rho_h[i], u = v_h[i];
-      if (e <= 0.0) continue;  // vacuum
-      const Real pr = eos.p0(e, r);
-      const Real gam2 = 1.0 / (1.0 - u * u);
-      const Real gam = Kokkos::sqrt(gam2);
-      hR(g + i, 0, 0) = gam * r;
-      hM(g + i, 0, 0) = (e + pr) * gam2 * u;
-      hE(g + i, 0, 0) = (e + pr) * gam2 - pr;
+      he(g + i, 0, 0) = eps_h[i]; hr(g + i, 0, 0) = rho_h[i]; hv(g + i, 0, 0) = v_h[i];
     }
-    Kokkos::deep_copy(U[0], hR); Kokkos::deep_copy(U[1], hM); Kokkos::deep_copy(U[2], hE);
+    Kokkos::deep_copy(Uh[0], he); Kokkos::deep_copy(Uh[1], hr); Kokkos::deep_copy(Uh[2], hv);
+    for (int c = 0; c < 3; ++c) Kokkos::deep_copy(U[c], 0.0);
+    Kokkos::parallel_for("hydro1d_cons_from_prim", interior_policy(grid),
+                         detail::ConsFromPrim1K<EoS>{eos, Uh[0], Uh[1], Uh[2], U[0], U[1], U[2]});
     update_primitives();
   }
 
