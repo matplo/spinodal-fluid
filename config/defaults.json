@@ -55,7 +55,16 @@
   },
   "obs": {
     "moment_density": "computational_frame",
-    "clump_rho_min_rho_s": 7.0
+    "clump_rho_min_rho_s": 7.0,
+    "clump_connectivity": 6,
+    "clump_hist_max": 25,
+    "fluid_end_eps_eps_s": 5.0,
+    "every_steps": 1,
+    "phase_rho_max_rho_s": 12.0,
+    "phase_rho_step_rho_s": 0.1,
+    "phase_eps_max_eps_s": 30.0,
+    "phase_eps_step_eps_s": 0.25,
+    "hist_times_fm": []
   },
   "linear": {
     "particle_density_in_spline_region": "linear_in_rho"

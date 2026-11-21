@@ -1,0 +1,45 @@
+{
+ "baryon_per_clump": [
+  0.5133112251345078
+ ],
+ "bin_definition": "bin k counts clumps with round(B) = k; bin 0 includes B < 0.5",
+ "cells_per_clump": [
+  56
+ ],
+ "connectivity": 6,
+ "density": "computational_frame",
+ "histogram": [
+  0,
+  1,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0
+ ],
+ "n_clumps": 1,
+ "overflow": 0,
+ "periodic_wrap": true,
+ "step": 0,
+ "threshold_rho_s": 7.0,
+ "time_fm": 0.0
+}

@@ -1,0 +1,33 @@
+{
+  "fluid_end_eps_eps_s": 5.0,
+  "fluid_end_step": 15,
+  "fluid_end_time_fm": 1.2,
+  "max_enhancement": {
+    "N2": {
+      "time_fm": 0.0,
+      "value": 1.0
+    },
+    "N3": {
+      "time_fm": 0.0,
+      "value": 1.0
+    },
+    "N4": {
+      "time_fm": 0.0,
+      "value": 1.0
+    },
+    "N5": {
+      "time_fm": 0.0,
+      "value": 1.0
+    },
+    "N6": {
+      "time_fm": 0.0,
+      "value": 1.0
+    },
+    "N7": {
+      "time_fm": 0.0,
+      "value": 1.0
+    }
+  },
+  "n_records": 13,
+  "reference_time_fm": 0.0
+}
