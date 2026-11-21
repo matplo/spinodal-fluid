@@ -575,3 +575,13 @@ column `fit_resid` and `min_pgrad_over_p0` mark them. The plots show only modes 
 
 The comparison with Fig. 2 (lower) of arXiv:1209.2462 and Fig. 4 of arXiv:1302.2956 (background `(6 rho_s, 10 eps_s)`, perturbation `(0.1 rho_s, 0.2 eps_s)`, finite temperature) needs the finite-temperature table of WP2b. `spf_growth` implements that perturbation
 (`growth.paper_perturbation=true`) but it was not run, because the cold-thermal EoS is not the paper's equation of state. `gradient.form = korteweg_full` stops with the error "not implemented, see plan WP9".
+
+### Test totals and GPU node (WP4)
+
+CPU (workstation, head c61b33f): `spf_tests` on `cpu-serial` and on `cpu-openmp` (8 threads): 61 test cases, 609 assertions, 601 passed, 8 failed; the 8 failed assertions belong to the six test cases marked
+`doctest::may_fail` (T4.1 a = 0.033, T4.2 above the cut-off, T4.2 stable background, T4.4, T4.5, T4.5b; the failing lines are `test_gradient.cpp` 260, 261, 288 (twice), 307, 373, 526, 535) and are the expected failures listed above; all 61 test cases are reported as passed by doctest
+and `ctest` is 2/2 on both presets (`cpu-serial`: 268 s). The WP3 tests are unchanged and pass (46 cases from WP3 plus 15 WP4 cases).
+
+GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4), commit c61b33f1d0a6b592b1ec7f9725e804885b032fec built from a fresh clone of the branch: `ctest` 2/2 passed (`spf_tests` 50.2 s); doctest: 61 test cases passed, 609 assertions, 601 passed, 8 failed
+(the same eight assertions at the same source lines as on the CPU: the expected failures). `spf_growth` for `a = 0.033 fm`, `dx = 0.2 fm`, all 29 modes on CUDA against the CPU run of `docs/figures/growth.csv`: largest relative difference of the fitted rate
+2.0e-9 in `gamma` (22 unstable modes) and 1.8e-8 in `omega` (7 stable modes); tolerance 1e-6; pass. Recovery failures: 0.
