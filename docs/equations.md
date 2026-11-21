@@ -127,3 +127,15 @@ right state.
   `eps* = eps_L`).
 
 For `eps_L = 10`, `eps_R = 1` GeV/fm^3 the values are printed by the test (see `docs/validation.md`).
+
+## Scaled equation of state and tabulated p0 (WP2c)
+
+Scaled family (Steinheimer and Randrup, PRC 87, 054903, Sect. V C, Eqs. 17-19): `s_bc(eps, rho) = s_0(b eps, c rho)` gives
+`T_bc = T_0(b eps, c rho)/b`, `mu_bc = (c/b) mu_0(b eps, c rho)`, `p_bc = p_0(b eps, c rho)/b`, `vs2_bc = vs2_0(b eps, c rho)`.
+By the chain rule `dp_deps_bc = dp_deps_0(b eps, c rho)` and `dp_drho_bc = (c/b) dp_drho_0(b eps, c rho)`; with
+`vs2 = dp_deps + rho/(eps + p) dp_drho` these reproduce `vs2_bc = vs2_0(b eps, c rho)` because `eps + p_bc = (b eps + p_0)/b`.
+Implemented in `include/spf/eos/scaled.hpp` (`EosScaled<Base>`).
+
+Tabulated `p0(eps, rho)` (`include/spf/eos/table.hpp`, format in `docs/eos_table_format.md`): with lattice coordinates `x = eps/eps_s`,
+`y = rho/rho_s`, `dp_deps = (dp/dx)/eps_s`, `dp_drho = (dp/dy)/rho_s`. Below the cold curve the pressure is `P(rho) = p0(eps_min(rho), rho)`, so
+`dp_deps = 0` and `dp_drho = p_y/rho_s + (p_x/eps_s) d eps_min/d rho`; `vs2` uses these with the unclamped `eps + P` in the enthalpy, as `EosColdThermal` does.

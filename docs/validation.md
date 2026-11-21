@@ -135,3 +135,47 @@ Notes
   (bisection); all run in a single-thread kernel. The spinodals differ from the quintic-spline values by 2e-3 rho_s because p_c' of a cubic
   Hermite interpolant on the grid is only piecewise linear.
 * T2.4 evaluates the EoS at eps = (eps/eps_s) * 0.940 GeV * 0.153 fm^-3 taken from the JSON entries.
+
+## WP2c - tabulated equation of state and scaled-EoS wrapper (2026-11-20)
+
+Test source: `tests/test_eos_table.cpp` (doctest, inside `spf_tests`; 36 cases / 399 assertions with all existing ones). Every compared evaluation runs
+inside a Kokkos kernel. CPU: `cpu-serial` and `cpu-openmp` (16 threads) on the macOS arm64 workstation (identical printed values). GPU: Release preset
+`cuda-turing75` (CUDA 12.9, GCC 13.4) on the GPU node (NVIDIA TITAN RTX), `ctest` 2/2 passed, `spf_tests` 36 cases / 399 assertions passed.
+Committed table: `tests/data/synthetic_eos.{json,bin}`, 201 x 401 lattice (x in [0, 40], dx = 0.2; y in [0, 16], dy = 0.04), 2.58 MB, synthetic, reader tests only.
+"Default lattice" is the plan lattice (x in [0, 40], dx = 0.05; y in [0, 16], dy = 0.02: 801 x 801), generated in the test from `data/eos/cold_curve.dat`.
+
+| Test | Quantity | Measured (CPU) | Measured (GPU) | Tolerance | Result |
+|---|---|---|---|---|---|
+| T2c.0 | `EosTable`, `EosScaled<EosTable>`, `EosScaled<EosColdThermal>` satisfy `EquationOfState`, trivially copyable | yes | yes | - | pass |
+| T2c.1 | sizes, lattice, checksum verified; truncated, long, bad checksum (header and data), 10 missing-key / bad-version files rejected | all rejected with messages | same | - | pass |
+| T2c.2 | nodes: max relative deviation of p0, T, mu, s, bilinear / bicubic (3894 nodes each) | 0 / 0 | 0 / 0 | 1e-14 | pass |
+| T2c.3 | default lattice, bilinear: p0 rel. error max / median | 1.7282e-04 / 8.1699e-07 | same | max < 1e-3 | pass |
+| T2c.3 | default lattice, bicubic: p0 rel. error max / median | 2.9136e-06 / 2.0766e-09 | same | max < 1e-3 | pass |
+| T2c.3 | default lattice, bilinear: vs2 abs. error max / median / max in spinodal region | 6.8834e-03 / 8.5701e-05 / 3.8578e-03 | same | reported | - |
+| T2c.3 | default lattice, bicubic: vs2 abs. error max / median / max in spinodal region | 6.6579e-04 / 3.3835e-07 / 1.9660e-05 | same | reported | - |
+| T2c.3 | committed lattice, bilinear: p0 rel. error max / median | 5.3377e-04 / 3.2917e-06 | same | reported | - |
+| T2c.3 | committed lattice, bicubic: p0 rel. error max / median | 2.9336e-05 / 1.7550e-08 | same | reported | - |
+| T2c.3 | committed lattice, bilinear: vs2 abs. error max / median / spinodal max | 1.2075e-02 / 1.7425e-04 / 8.1090e-03 | same | reported | - |
+| T2c.3 | committed lattice, bicubic: vs2 abs. error max / median / spinodal max | 2.9332e-03 / 1.5748e-06 / 7.8229e-05 | same | reported | - |
+| T2c.4 | clamp: max abs(p0(eps<eps_min) - p0(eps_min)), max abs(dp_deps) (500 points), both interpolations | 0, 0 | 0, 0 | exact | pass |
+| T2c.4 | clamped dp_drho vs centred difference, bilinear / bicubic (relative to max(abs(fd), 1e-3)) | 1.64e-08 / 1.63e-08 | same | 1e-5 | pass |
+| T2c.5 | 200 interior points: dp_deps vs centred difference (step 1e-6 relative), bilinear / bicubic | 2.223e-10 / 2.283e-10 | same | 1e-6 | pass |
+| T2c.5 | dp_drho, bilinear / bicubic (156 points with abs(dp_drho) >= 1e-3 GeV) | 1.318e-08 / 8.124e-08 | same | 1e-6 | pass |
+| T2c.5 | dp_drho absolute difference at the 44 points with abs(dp_drho) < 1e-3 GeV, bilinear / bicubic | 6.05e-11 / 6.57e-11 GeV | same | 1e-9 GeV | pass |
+| T2c.6 | four identities of the wrapper (p0, dp_deps, dp_drho, vs2), b = c = 1/1.3 and b = 0.8, c = 1.25, EosColdThermal and EosTable (both interpolations); 100 points | 0 (all) | at most 3.5e-16 (EosColdThermal p0) | 1e-13 | pass |
+| T2c.6 | T/b, (c/b) mu, s identities for EosTable | 0 | 0 | 1e-13 | pass |
+| T2c.6 | vs2 vs finite-difference isentropic derivative of wrapped p0 (20 points), max over all 6 cases | 3.31e-11 | 2.47e-11 (EosColdThermal, b = c = 1/1.3; table cases same as CPU to 3 digits) | 1e-6 | pass |
+| T2c.6 | b = c = 1 minus base, max absolute difference | 0 | 0 | exact | pass |
+| T2c.7 | extrapolate = false: max abs(p0(outside) - p0(clamped argument)); check_range reports all four violations | 0; reported | 0; reported | exact | pass |
+| T2c.7 | extrapolate = true: linear table reproduced (36 points inside and outside), p0, T, mu, s; bilinear / bicubic | 1.20e-14 / 1.20e-14 | 1.11e-14 / 1.11e-14 | 1e-12 | pass |
+| T2c.7 | extrapolate = true: dp_deps, dp_drho; bilinear / bicubic | 2.70e-14 / 1.32e-14 | 8.49e-16 / 5.82e-15 | 1e-12 | pass |
+| GPU | `ctest` and `spf_tests` on `cuda-turing75` at commit 3949d11 | - | ctest 2/2; 36 cases, 399 assertions, all passed | all pass | pass |
+| GPU | T2c.3 error numbers equal CPU to three significant digits | - | all printed values (four lines) identical | 3 digits | pass |
+
+Notes
+
+* Random points of T2c.3: fixed seed, 2000 points, rho uniform in [0.2, 16] rho_s, eps uniform between the analytic cold curve and 40 eps_s; the spinodal-region subset (5.49 < rho/rho_s < 8.61) has 425 points.
+* The bilinear vs2 error is dominated by the discontinuity of the bilinear derivatives at cell edges; bicubic reduces the spinodal-region vs2 error by about 200 times on the default lattice.
+* T2c.5 compares the derivative with a centred difference of p0; for dp_drho on the conformal plasma branch (p = eps/3) the exact value is zero, so points with abs(dp_drho) < 1e-3 GeV are compared in absolute terms.
+* T2c.6 and T2c.7 differences at the 1e-16 level between CPU and GPU are rounding-level differences between the host and device floating-point code paths.
+* Reading of Steinheimer and Randrup, Phys. Rev. C 87, 054903, Sect. V C: Eqs. (17)-(19) agree with the brief (T_bc = T_0/b, mu_bc = (c/b) mu_0, p_bc = p_0/b, v_s,bc = v_s,0; entropy density s_bc = s_0(b eps, c rho), scaled critical point (eps_crit/b, rho_crit/c)). The derivative identities dp_deps_bc and dp_drho_bc follow from the chain rule and are not in the paper. The identity p = T s - eps + mu rho (hence the paper's p_bc) requires a thermodynamically consistent base; the synthetic table is not, and the wrapper applies the four rules of the brief literally.
