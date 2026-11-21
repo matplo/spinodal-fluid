@@ -147,6 +147,7 @@ struct Hydro1D {
     p = grid.make_field("p");
     pv = grid.make_field("pv");
     zero = grid.make_field("zero");
+    Kokkos::deep_copy(zero, 0.0);
     fail = Kokkos::View<int***>("fail", grid.size(0), grid.size(1), grid.size(2));
   }
 
