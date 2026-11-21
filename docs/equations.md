@@ -211,8 +211,7 @@ the computational-frame baryon density `R = gamma rho` (default; then `A` is exa
 * Moments: `A = Integral D d^3r`, `<D^N> = (1/A) Integral D^N D d^3r`, normalised moment `<D^N> / <D>^N` (N = 1 gives 1). Enhancement(t) = normalised moment(t) / normalised
   moment(t_init); the maximum over time is taken by `tools/obs_ensemble.py` and in `observables_summary.json`.
   **Prefactor note.** arXiv:1302.2956 Eq. 13 prints the prefactor ambiguously ("A = <rho^0>"). The reading `1/A` is the one for which the normalised moments
-  are dimensionless and N = 1 gives exactly 1, as the paper states; it is used here. (With a prefactor `1/V` instead, the ratio `<D^N>/<D>^N` would carry a factor `(V/A)^(N-1)`... i.e. it would not be
-  a pure density ratio.) The sums are evaluated on `D / mean(D)` (a pre-pass computes the mean) so that the rounding error of the N-th power stays near N machine epsilon.
+  are dimensionless and N = 1 gives exactly 1, as the paper states; it is used here. A prefactor `1/V` would make the ratio carry a factor `(V/A)^(N-1)`, so it would no longer be a pure density ratio. The sums are evaluated on `D / mean(D)` (a pre-pass computes the mean) so that the rounding error of the N-th power stays near N machine epsilon.
 * Transverse flow, Eqs. 14-16 with the weight `D` (the same density as the moments), laboratory-frame velocities, and `x`, `y` measured from the beam axis (the z axis through the centre of the box):
   `M = Integral D d^3r`, `M Q^2 = Integral (x^2 + y^2) D d^3r`, `U_perp = (1/(M Q)) Integral (v_x x + v_y y) D d^3r`. For `v = H (x, y)` this is `U_perp = H Q`, `Q^2 = <x^2 + y^2>`;
   for a Gaussian of width sigma `U_perp = sqrt(2) H sigma`.
