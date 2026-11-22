@@ -332,6 +332,21 @@ class Hydro3D {
     steps = 0;
   }
 
+  // Set the conserved fields directly (WP5 initial states). The five Views must have the extents of this grid (ghost layers
+  // included; the ghost layers are copied as they are, normally zero). Time and step counter are reset; with the gradient term on,
+  // rho_rf is filled lazily by the first step (init_rho_rf). No equation of state is used here.
+  void set_conserved(const Field3& R_, const Field3& Mx_, const Field3& My_, const Field3& Mz_, const Field3& E_) {
+    const Field3* src[5] = {&R_, &Mx_, &My_, &Mz_, &E_};
+    for (int c = 0; c < 5; ++c) {
+      if (src[c]->extent(0) != U[c].extent(0) || src[c]->extent(1) != U[c].extent(1) || src[c]->extent(2) != U[c].extent(2))
+        throw std::invalid_argument("Hydro3D::set_conserved: field extents differ from the grid");
+      Kokkos::deep_copy(U[c], *src[c]);
+    }
+    rho_rf_valid = false;
+    time = 0.0;
+    steps = 0;
+  }
+
   // The finite-range pressure is applied (form != off and the hook is enabled).
   bool gradient_on() const { return grad.form != GradientForm::Off && use_p_extra; }
   bool force_only() const { return gradient_on() && grad.recovery == GradientRecovery::ForceOnly; }
@@ -424,6 +439,18 @@ class Hydro3D {
     std::vector<std::vector<Real>> data;
     for (const auto& n : names) data.push_back(interior_copy(field_by_name(n)));
     write_snapshot_files(base, grid.n, grid.dx, time, steps, names, data, config_echo);
+  }
+
+  // Failure flags of the most recent recovery (update_primitives or a sweep), as a host vector like interior_copy (1 = failed).
+  std::vector<int> fail_flags_copy() const {
+    auto h = Kokkos::create_mirror_view(fail_);
+    Kokkos::deep_copy(h, fail_);
+    std::vector<int> out(static_cast<size_t>(idx_n()));
+    size_t q = 0;
+    for (int ix = 0; ix < grid.n[0]; ++ix)
+      for (int iy = 0; iy < grid.n[1]; ++iy)
+        for (int iz = 0; iz < grid.n[2]; ++iz) out[q++] = h(grid.g[0] + ix, grid.g[1] + iy, grid.g[2] + iz);
+    return out;
   }
 
   // Interior of a field as a host vector, C order [ix][iy][iz].

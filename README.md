@@ -27,7 +27,8 @@ been measured so far.
 | WP2 | equations of state | analytic EoS done; table reader and scaled-EoS wrapper (WP2c) implemented, see `docs/validation.md`; physical tables pending (WP2b) |
 | WP3 | 3+1D solver, GPU validation | implemented, see `docs/validation.md` (WP3 and WP3g) |
 | WP4 | finite-range term, spinodal growth rates | implemented, see `docs/validation.md` (WP4); several comparisons with the continuum formulae at 8 to 10 cells per wavelength are reported as expected failures |
-| WP5, WP7 | initial conditions, collision runs | not started |
+| WP5 | initial conditions: OSCAR2013 reader, Gaussian deposition, SMASH driver, `spf_ic` | implemented, see `docs/initial_state.md` and `docs/validation.md` (WP5); evolution with the default `paper_pressure` term fails the recovery in the dilute fringe (reported in T5.4) |
+| WP7 | collision runs | not started |
 | WP6 | observables (moments, clumps, U_perp, phase plane), `spf_observe`, ensemble script | implemented, see `docs/validation.md` and `docs/observables.md` |
 | WP8 | linear-response library (dispersion relation, transport coefficients, G_k, Lalime), `spf_linear`, digitised Figs. 2-7 of arXiv:1007.1448 | implemented, see `docs/validation.md` (WP8); nuclear-EoS provider pending (WP2b) |
 

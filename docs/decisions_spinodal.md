@@ -22,10 +22,15 @@ Every modelling choice is a named key in `config/defaults.json` (or a build pres
 | S14 | build preset; `run.backend` | `cpu-openmp`* / `cpu-serial` (reference) / `cuda`, `cuda-turing75`; `run.backend = auto`* records whatever was compiled | presets implemented (WP0); production backend fixed after WP3g: on the GPU node the CUDA backend is 22 times faster than the 20 cores for 160^3 and 320^3 (ideal EoS; `docs/validation.md`, WP3g, G4); the default preset is not changed here |
 | S15 | `run.precision` | `double`* / `single` | planned (later; needs its own validation) |
 | S16 | `gradient.half_step_refresh` | `lagged`* / `midpoint` | both implemented (WP4): `lagged` refreshes `p_grad` from the density of the previous recovery before each recovery (brief); `midpoint` adds a refresh from the half-step density and a second recovery of the half-step state; no material difference in the noise tests (T4.5c) |
+| S01 | `ic.generator`, `ic.oscar_path`, `ic.oscar_event`, `ic.oscar_time_fm`, `ic.smash_time_offset_fm` (WP5) | `smash_cascade`* / `oscar_file` / `glauber_gaussians` (explicit fallback) / `analytic` | implemented and tested (WP5); SMASH 3.4.2 (Pythia 8.316) in cascade mode, `Fermi_Motion: frozen`, centre-of-velocity frame; `smash_cascade` and `oscar_file` share the reader |
+| S02 | `ic.t_init_radius_mode`, `ic.t_init_r0_fm`, `ic.t_init_radius_fm`, `ic.smash_time_offset_fm` (WP5) | `r0_A13`* (7.110 fm, 11.257 fm/c at 3 A GeV) / `fixed` (6.62 fm, 10.481 fm/c); offset between SMASH time and `t_init`: 0* | implemented (WP5); SMASH time zero = contact of the contracted spheres of radius R + d, measured first NN collision 0.53 +- 0.45 fm/c, offset 0; no explicit-time key (use `ic.oscar_time_fm`) |
+| S03 | `ic.sigma_init_fm`, `ic.cutoff_sigma` | 1.0* / 0.7 / 0.5; cutoff 4 sigma* | implemented and tested for the three widths (WP5, T5.1); central state at 3 A GeV: 5.04 / 5.70 / 6.07 `rho_s` |
+| S04 | `ic.gaussian_contraction` (WP5) | `particle_gamma_z`* (gamma_z of the hadron; the papers contract along z, arXiv:0710.0332 Eq. 6, arXiv:0806.1695 Eq. 4, without defining gamma_z) / `cm_gamma` / `none`; supersedes `undecided` | implemented and tested (WP5, T5.1); central 3 A GeV state: 5.04 (default), 5.67 (`cm_gamma`), 4.97 (`none`) |
 
 ## Changes with respect to the plan
 
 * S02: the single key `ic.t_init_radius_fm` of the plan became three keys so that every key has one JSON type
   (the configuration loader rejects an override whose type differs from the default).
 * S10: `obs.clump_rho_min` is named `obs.clump_rho_min_rho_s` to carry its unit.
+* S04 (WP5): the default of `ic.gaussian_contraction` changed from `undecided` to `particle_gamma_z`; the four WP5 rows S01 to S04 above (appended, the earlier "planned" rows are kept) carry the implemented status.
 * Dependency: Kokkos 5.3.0 (release of 2026-11-11) is pinned, not 5.1.0.

@@ -23,6 +23,7 @@ add_library(spf
   src/linear/thermo.cpp
   src/linear/dispersion.cpp
   src/linear/amplification.cpp
+  src/initial_state.cpp
 )
 target_include_directories(spf PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -44,6 +45,9 @@ target_link_libraries(spf_compare PRIVATE spf)
 add_executable(spf_observe apps/spf_observe.cpp)
 target_link_libraries(spf_observe PRIVATE spf)
 target_compile_definitions(spf_observe PRIVATE SPF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_executable(spf_ic apps/spf_ic.cpp)
+target_link_libraries(spf_ic PRIVATE spf)
+target_compile_definitions(spf_ic PRIVATE SPF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 add_executable(spf_growth apps/spf_growth.cpp)
 target_link_libraries(spf_growth PRIVATE spf)
 target_compile_definitions(spf_growth PRIVATE SPF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

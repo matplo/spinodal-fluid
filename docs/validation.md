@@ -681,3 +681,99 @@ Derived trajectories for `spf_linear`: `trajectory_3fluid_5_markers.csv`, `traje
 
 CPU (workstation, head b22de57 for the code): `ctest` 2/2 on `cpu-serial` (280 s) and on `cpu-openmp` (16 threads, 668 s); `spf_tests`: 77 test cases, 20809 assertions, 20800 passed, 9 failed; the nine failed assertions are the eight expected failures of WP4 (`doctest::may_fail`) and the one expected failure T8.5b (`should_fail`); no other failure. WP8 adds 9 test cases (T8.0, T8.1, T8.2, T8.3, T8.4, T8.5, T8.5b, T8.5c, T8.5d).
 GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4), head b22de57 built from a fresh clone of the branch: `ctest` 2/2 passed (`spf_tests` 54.2 s); 77 test cases, 20809 assertions, 20800 passed, 9 failed (the same nine expected failures); the `T8.` numbers on the GPU node coincide with the CPU values (the library runs on the host). `spf_linear` ran on the dense 3-fluid trajectory. The remote clone was deleted.
+## WP5 - initial conditions from a hadron cascade (2026-11-22)
+
+Documentation of the method: `docs/initial_state.md`. Code under test: `include/spf/initial_state.hpp`, `src/initial_state.cpp`, `apps/spf_ic.cpp`,
+`tests/test_initial_state.cpp`. SMASH 3.4.2 (Pythia 8.316) runs on the GPU node; the output files were read on the workstation and on the GPU node.
+Data: `data/ic/t52_summary.json`, `data/ic/t52_variants_3AGeV.json`, `data/ic/time_convention_3AGeV.json`.
+
+### T5.1 conservation of the deposition (tolerance 1e-10 relative)
+
+300 random hadrons (nucleons, antinucleons, mesons, hyperons, a deuteron; positions in +-6 fm, `|p_z|` up to 2.5 GeV), grid 48^3, `dx = 0.5` fm, box centred.
+Relative deviation of grid sum and particle sum; for `B` and `E` relative to the sum, for `p_x, p_y, p_z` relative to `sum |p_j|` (the vector sums nearly cancel).
+Largest value over `B, E, p_x, p_y, p_z` for each case; CPU (`cpu-serial`) / GPU (`cuda-turing75`):
+
+| sigma_init | contraction | CPU max dev. | GPU max dev. | stencils clipped | single-cell fallback |
+|---|---|---|---|---|---|
+| 1.0 | none | 1.3e-14 | 7.8e-17 | 0 | 0 |
+| 1.0 | particle_gamma_z | 1.1e-14 | 6.6e-17 | 0 | 0 |
+| 1.0 | cm_gamma | 6.4e-15 | 1.3e-16 | 0 | 0 |
+| 0.7 | none | 1.0e-14 | 1.3e-16 | 0 | 0 |
+| 0.7 | particle_gamma_z | 7.9e-15 | 5.6e-17 | 0 | 0 |
+| 0.7 | cm_gamma | 3.2e-15 | 1.3e-16 | 0 | 0 |
+| 0.5 | none | 1.9e-15 | 1.9e-16 | 0 | 0 |
+| 0.5 | particle_gamma_z | 2.7e-15 | 1.9e-16 | 0 | 1 |
+| 0.5 | cm_gamma | 5.9e-15 | 1.3e-16 | 0 | 0 |
+
+All 9 cases pass (tolerance 1e-10) on both backends. The one single-cell fallback (sigma 0.5, `particle_gamma_z`: a hadron with `gamma_z` large enough that the window of
+`+-4 sigma/gamma_z` holds no grid point of 0.5 fm) still conserves exactly. The CPU/GPU difference of the largest deviation reflects the summation order
+(atomic adds, parallel reductions). Further deposition tests: a clipped stencil is reported (a baryon at x = 7.5 fm in a +-8 fm box: outside fraction
+between 0.1 and 0.6, `n_particles_clipped = 1`), the z extent of a contracted Gaussian is below half of the uncontracted one (`gamma_z` = 3.2), the analytic
+counter-streaming state integrates to `2A = 416` (2e-3) and its centre equals `2 gamma_cm rho_0` (2e-3).
+
+### T5.2 SMASH Pb+Pb, b = 0, central state at `t_init` (reported measurement, not pass/fail)
+
+SMASH 3.4.2, cascade, `Fermi_Motion: frozen`, centre-of-velocity frame, seeds 1000 + E_lab; `R = 1.2 A^(1/3)` (7.110 fm); deposition `sigma_init = 1.0` fm,
+`particle_gamma_z`, `dx = 0.2` fm, 160^3 cells (200 x 200 x 240 at 1 A GeV). Central = cells with centre within 1 fm of the box centre (about 550 cells); rest-frame
+`rho`, `eps` after recovery with `cold_thermal_two_phase`; in units of `rho_s = 0.153 fm^-3`, `eps_s = 0.14382 GeV/fm^3`. Mean over events, (standard deviation over events), [min, max].
+Counter-streaming point: `(2 gamma_cm, sqrt(s_NN) gamma_cm / m_N)`. Cold curve: `eps_c(rho)/eps_s` from `data/eos/cold_curve.dat` (linear interpolation) at the mean central `rho`.
+(The 3 A GeV events of the CPU run were produced with the OpenMP build, the GPU run of event 0 gives the same central values: 4.9829 / 7.8421.)
+
+| E_lab [A GeV] | events | t_init [fm/c] | central rho/rho_s | central eps/eps_s | counter-streaming (rho, eps) | cold eps_c/eps_s at mean rho | B(abs y_cm < 0.5)/B |
+|---|---|---|---|---|---|---|---|
+| 1 | 5 | 19.50 | 3.14 (0.46) [2.52, 3.61] | 3.70 (0.62) [2.97, 4.34] | (2.48, 3.06) | 3.37 | 0.825 |
+| 2 | 5 | 13.79 | 4.58 (0.17) [4.31, 4.74] | 6.66 (0.47) [6.00, 7.32] | (2.87, 4.13) | 5.65 | 0.733 |
+| 3 | 20 | 11.26 | 5.04 (0.94) [3.55, 6.61] | 8.05 (1.40) [5.47, 10.13] | (3.22, 5.19) | 6.51 | 0.699 |
+| 4 | 5 | 9.75 | 5.69 (1.01) [4.97, 7.35] | 9.95 (1.85) [7.99, 12.82] | (3.54, 6.26) | 7.76 | 0.651 |
+| 5 | 5 | 8.72 | 5.64 (0.77) [4.94, 6.89] | 10.59 (1.80) [9.09, 13.40] | (3.83, 7.32) | 7.66 | 0.630 |
+| 6 | 5 | 7.96 | 5.00 (1.08) [3.40, 6.08] | 10.20 (1.66) [8.42, 12.02] | (4.09, 8.38) | 6.43 | 0.603 |
+
+Baryon number is 416 in every event (all 45 events); recovery failures 0, limiter cells 0, lost baryon fraction at most 9.1e-15 (2 to 6 A GeV, 160^3) and 5.6e-15 (1 A GeV, 200 x 200 x 240).
+At 3 A GeV the cold curve at the counter-streaming density `3.22 rho_s` gives `eps_c/eps_s = 3.48`, the counter-streaming `eps` is 5.19. Result: the SMASH central state at
+3 A GeV (5.04 `rho_s`, 8.05 `eps_s`, event-to-event spread 19 % and 17 %) is **not between** the counter-streaming point and the cold curve, as the plan expected: it lies at a higher density (baryon stopping and
+compression) and above the cold curve by 1.5 `eps_s` at its own density (thermal part), as the counter-streaming point does at its density (+1.7). Sensitivity at 3 A GeV (20 events, central rho/rho_s, eps/eps_s):
+contraction none 4.97 / 7.94, `particle_gamma_z` 5.04 / 8.05, `cm_gamma` 5.67 / 9.03; `sigma_init = 0.7` fm 5.70 / 9.00, `sigma_init = 0.5` fm 6.07 / 9.39 (`data/ic/t52_variants_3AGeV.json`).
+Fraction of baryon number at `|y_cm| < 0.5` at 3 A GeV: 0.699 (the Glauber-Gaussians fallback has 0: all nucleons sit at `+-y_cm = 1.04`).
+At 1 A GeV the 160^3 box is too small (lost baryon fraction 5e-6 to 2e-4: `spf_ic` stopped with the error message), which is why the 1 A GeV row uses a larger box.
+
+### T5.3 reader round trip and PDG rule (exact)
+
+Hand-written file `tests/data/oscar_3particles.oscar` (SMASH 3.4.2 format with `ensemble`, proton / anti-neutron / pi+): all 8 columns, pdg and the baryon numbers (+1, -1, 0)
+read back exactly (`==`), block kind, declared count 3, impact parameter 0, block selection by time. Second file written by the test (no `ensemble` word, other column order, an `in`
+block, two `out` blocks): pass. Malformed/missing file: exception. PDG rule: 28 ids (p, pbar, n, nbar, Lambda, Sigma, Xi, Omega and anti-Omega, Delta++, Delta(1232) 1114, Delta-bar, pi, K, eta, J/psi,
+photon, electron, diquarks 2101 and 1103, deuteron, anti-deuteron, He-4, Pb-208 = 1000822080, tritium, id 0): all correct. Pass on CPU and GPU.
+
+### T5.4 deposited SMASH state in Hydro3D for 2 fm/c (3 A GeV, event 0, 160^3, dx = 0.2 fm, periodic box, 25 steps)
+
+Run with `spf_ic --evolve 2.0` on the GPU node (CUDA) and on the workstation (OpenMP); same numbers up to the summation order. Counts over all sweeps and half-steps (a failing cell is counted at each recovery).
+GPU values (OpenMP in brackets where they differ):
+
+| eos.model | gradient.form | recovery failures during run | failing cells in the final state | limiter activations | R/R0, E/E0 after 2 fm/c |
+|---|---|---|---|---|---|
+| ideal | off | **0** | 0 | 2687637 (2687593) | 0.99999999994, 0.99999999999878 |
+| cold_thermal_two_phase | off | **0** | 0 | 1394952 (1395054) | 0.9999999997, 0.99999999999871 |
+| ideal | paper_pressure (default) | 588821 (589112) | 9485 (9488) | 2687993 (2687767) | same |
+| cold_thermal_two_phase | paper_pressure (default) | 270669 (270618) | 4302 (4316) | 1395124 (1395037) | same |
+
+The deposited state itself has 0 recovery failures and 0 limiter cells. **The acceptance criterion (no recovery failures) is met with the gradient term off and not met with the default `paper_pressure` term.**
+Where the failing cells are (final state, OpenMP run): radius 9.3 to 17.8 fm from the centre (ideal; 8.8 to 17.1 fm for the cold-thermal EoS), computational-frame density at most 0.021 `rho_s` (0.35 `rho_s`),
+energy density at most 0.175 `eps_s` (0.73 `eps_s`), `|M|/E = 1` to within 4e-16 (they sit on the `E >= |M|` limiter surface, `v = 1`), and together they carry 4.0e-4 of the 416 baryons (8.5e-3 for the cold-thermal EoS) and 3.8e-3 GeV of 641 GeV
+(2.0e-2 GeV). Probable cause (inferred from the failure condition in `recover_core` and from switching the term off; `p_extra` itself was not dumped; not fixed here): at the dilute leading edge the limiter saturates `|M| = E`; the recovery needs `E + p_extra - |M| >= 0` and
+`p_extra = p_grad` is negative there, so `recover_core` flags the cell (the recovery failure of the WP3 follow-up above, now with the finite-range pressure). The limiter
+activations are the same with the term on or off (so the `E >= |M|` violation at the fringe does not depend on the gradient term; it appears to come from the SHASTA transport of the cold fringe). The proxy test in `tests/test_initial_state.cpp`
+(Glauber-Gaussians state, 64^3, dx = 0.5 fm, 2 fm/c, 416 baryons) shows the same: gradient off, 0 failures for both EoS (limiter cells 156902 and 115202 on CPU); default term, 69022 and 60304 failures on CPU (69024 and 60235 on GPU).
+It is a `doctest::may_fail` test case (two expected failed assertions).
+
+### Time convention of SMASH (measured; details in `docs/initial_state.md`)
+
+First NN collision at 0.53 +- 0.45 fm/c (8 events; -0.18 to 1.06), central density maximum at 8.2 +- 1.4 fm/c; offset used by the driver: 0.
+
+### Test totals and GPU node (WP5)
+
+CPU (workstation, macOS arm64, head f473f68 plus documentation): `spf_tests` on `cpu-serial` and on `cpu-openmp` (16 threads): 76 test cases, 905 assertions, 895 passed, 10 failed; the 10 failed assertions
+belong to the test cases marked `doctest::may_fail` (8 from WP4, 2 from WP5: "T5.4 proxy: default gradient term (paper_pressure) fails in the dilute fringe", `test_initial_state.cpp` lines 223 and 225).
+`ctest` 2/2 on both presets (`cpu-serial` 268 s, `cpu-openmp` 937 s while other work ran). WP5 adds 8 test cases (`tests/test_initial_state.cpp`).
+
+GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4), head f473f686930372cd7c8cf2f297bea0d77351d763 built from a fresh clone of the branch: `ctest` 2/2 passed (54.9 s);
+`spf_tests`: 76 test cases, 905 assertions, 895 passed, 10 failed (the same expected failures). `spf_ic` on the SMASH event (3 A GeV, event 0, 160^3) runs on CUDA with the central values of the table in T5.4 / T5.2.
+Not run on the GPU: the 45-event T5.2 scan (run with the OpenMP build; the GPU run of event 0 gives the same central values to 4 digits).
