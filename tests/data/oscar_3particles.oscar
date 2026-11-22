@@ -1,0 +1,8 @@
+#!OSCAR2013 particle_lists t x y z mass p0 px py pz pdg ID charge
+# Units: fm fm fm fm GeV GeV GeV GeV GeV none none e
+# SMASH-3.4.2
+# event 0 ensemble 0 out 3
+11.25 1.0 -2.0 3.5 0.938 1.49 0.3 -0.2 1.1 2212 0 1
+11.25 0.0 0.5 -3.5 0.938 1.49 -0.3 0.2 -1.1 -2112 1 0
+11.25 -1.0 2.0 0.0 0.138 0.359 0.1 0.1 0.3 211 2 1
+# event 0 ensemble 0 end 0 impact   0.000 scattering_projectile_target yes

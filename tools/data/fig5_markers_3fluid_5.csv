@@ -1,0 +1,17 @@
+# Fig. 5 (phase trajectories at 5 A GeV and phase boundaries)
+# fig5_markers_3fluid_5: marker centres of the trajectory (spaced by dt = 1 fm/c), in drawing order
+# mapping as fig5 curves
+# columns in data units
+rho_over_rho_s,T_MeV
+2.50474,100.007
+2.90958,99.5999
+4.31417,98.1206
+5.63963,96.6643
+6.55588,95.2068
+6.42719,94.542
+6.33043,93.9855
+6.18192,93.4284
+5.40643,92.8921
+4.19429,92.3564
+2.97224,91.8212
+1.99439,91.2641

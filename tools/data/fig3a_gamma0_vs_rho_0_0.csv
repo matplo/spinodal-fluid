@@ -1,0 +1,32 @@
+# Fig. 3 upper panel (fastest growth rate vs compression, T = 70 MeV)
+# curve: (eta0,kappa0) = (0,0)
+# source: arXiv:1007.1448 PDF, page 7, vector path with 25 vertices, stroke colour (0.0, 0.0, 0.0), dash '[] 0'
+# mapping: x = 3.60947 + 0.015556921 * X_pt ; y = 2.47294 + -0.011523392 * Y_pt (PDF user-space points, y downwards)
+# calibration: 7 x ticks, 6 y ticks; residuals rms/max x = 7.52e-05/0.000113, y = 1.09e-15/1.33e-15 (data units)
+# columns in data units
+rho_over_rho_s,gamma0_c_per_fm
+5.39988,0.0753396
+5.50008,0.180226
+5.59999,0.27511
+5.6999,0.36112
+5.8001,0.438004
+5.89999,0.506672
+5.9999,0.566444
+6.1001,0.617332
+6.2,0.659115
+6.2999,0.691335
+6.4001,0.713552
+6.5,0.725997
+6.5999,0.728221
+6.7001,0.720673
+6.8,0.702893
+6.89991,0.674891
+7.00011,0.637336
+7.1,0.589779
+7.19991,0.533107
+7.30011,0.467562
+7.40002,0.393997
+7.49991,0.312894
+7.60011,0.225559
+7.70002,0.13245
+7.79993,0.0346737

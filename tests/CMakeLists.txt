@@ -10,6 +10,8 @@ add_executable(spf_tests
   test_hydro3d.cpp
   test_observables.cpp
   test_gradient.cpp
+  test_linear.cpp
+  test_initial_state.cpp
 )
 target_link_libraries(spf_tests PRIVATE spf doctest::doctest)
 target_compile_definitions(spf_tests PRIVATE SPF_SOURCE_DIR="${PROJECT_SOURCE_DIR}" SPF_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")

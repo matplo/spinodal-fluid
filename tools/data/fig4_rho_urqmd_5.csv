@@ -1,0 +1,24 @@
+# Fig. 4 (net baryon density at the centre, from Ref. [17])
+# curve: UrQMD, 5 A GeV (solid orange with circles)
+# source: arXiv:1007.1448 PDF, page 8, vector path with 17 vertices, stroke colour (1.0, 0.65, 0.0), dash '[] 0'
+# mapping: x = -7.11121 + 0.078091811 * X_pt ; y = 3.90094 + -0.014874887 * Y_pt (PDF user-space points, y downwards)
+# calibration: 4 x ticks, 5 y ticks; residuals rms/max x = 0.000314/0.000422, y = 3.64e-06/5.95e-06 (data units)
+# columns in data units
+t_fm_c,rho_fm-3
+0.000148568,2.65494e-11
+1.00057,0.0648552
+1.9996,0.510849
+3.00012,0.768853
+4.00055,0.984004
+4.99958,1.144
+6.00001,1.29
+7.00052,1.38914
+7.99948,1.41799
+8.99999,1.23799
+10.0004,0.910001
+10.9994,0.661144
+11.9999,0.52315
+13.0004,0.379994
+13.9993,0.295996
+14.9999,0.229147
+15.0013,0.228865
