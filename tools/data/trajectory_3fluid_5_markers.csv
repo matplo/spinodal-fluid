@@ -1,0 +1,17 @@
+# trajectory 3fluid 5 A GeV from the markers of Fig. 5 (derived)
+# t = marker index in fm/c (markers are spaced by dt = 1 fm/c, paper Fig. 5 caption; start time inferred from Fig. 4, see tools/digitise_1007_1448.py)
+# rho/rho_s and T (MeV) are the digitised marker centres
+# columns: t_fm_c, rho_over_rho_s, T_MeV
+t_fm_c,rho_over_rho_s,T_MeV
+0,2.50474,100.007
+1,2.90958,99.5999
+2,4.31417,98.1206
+3,5.63963,96.6643
+4,6.55588,95.2068
+5,6.42719,94.542
+6,6.33043,93.9855
+7,6.18192,93.4284
+8,5.40643,92.8921
+9,4.19429,92.3564
+10,2.97224,91.8212
+11,1.99439,91.2641

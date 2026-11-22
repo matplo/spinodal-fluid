@@ -72,7 +72,18 @@
     "t_init_r0_fm": 1.2,
     "t_init_radius_fm": 6.62,
     "sigma_init_fm": 1.0,
-    "gaussian_contraction": "undecided"
+    "gaussian_contraction": "particle_gamma_z",
+    "cutoff_sigma": 4.0,
+    "oscar_path": "",
+    "oscar_event": 0,
+    "oscar_time_fm": -1.0,
+    "smash_time_offset_fm": 0.0,
+    "e_lab_gev": 3.0,
+    "nucleus_A": 208,
+    "ws_radius_fm": 6.62,
+    "ws_a_fm": 0.546,
+    "seed": 1,
+    "max_outside_fraction": 1e-6
   },
   "obs": {
     "moment_density": "computational_frame",
@@ -88,6 +99,20 @@
     "hist_times_fm": []
   },
   "linear": {
-    "particle_density_in_spline_region": "linear_in_rho"
+    "particle_density_in_spline_region": "linear_in_rho",
+    "eta0": 1.0,
+    "kappa0": 1.0,
+    "g_gluon": 16.0,
+    "g_quark": 12.0,
+    "k_min_fm": 0.05,
+    "k_max_fm": 4.0,
+    "nk": 80,
+    "sigma_eq2": 1.0,
+    "trajectory_csv": "",
+    "thermo_csv": "",
+    "toy_rho_c_rho_s": 5.6,
+    "toy_T_c_MeV": 142.5,
+    "toy_mass_GeV": 0.94,
+    "toy_cv0": 1.5
   }
 }

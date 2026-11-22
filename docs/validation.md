@@ -633,3 +633,148 @@ and `ctest` is 2/2 on both presets (`cpu-serial`: 268 s). The WP3 tests are unch
 GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4), commit c61b33f1d0a6b592b1ec7f9725e804885b032fec built from a fresh clone of the branch: `ctest` 2/2 passed (`spf_tests` 50.2 s); doctest: 61 test cases passed, 609 assertions, 601 passed, 8 failed
 (the same eight assertions at the same source lines as on the CPU: the expected failures). `spf_growth` for `a = 0.033 fm`, `dx = 0.2 fm`, all 29 modes on CUDA against the CPU run of `docs/figures/growth.csv`: largest relative difference of the fitted rate
 2.0e-9 in `gamma` (22 unstable modes) and 1.8e-8 in `omega` (7 stable modes); tolerance 1e-6; pass. Recovery failures: 0.
+
+## WP8 - linear-response library (arXiv:1007.1448)
+
+Code: `include/spf/linear/`, `src/linear/`, `apps/spf_linear.cpp`, tests `tests/test_linear.cpp` (printed lines start with `T8.`); equations: `docs/equations.md`, Sect. 12.
+All tests are independent of the nuclear equation of state. T8.1-T8.3 use the analytic toy EoS `ToyVdw(rho_c = 5 rho_s, T_c = 100 MeV)` at `T = 35 MeV` (isentropic spinodal core `vs2 < 0` inside the wider isothermal spinodal `vT2 < 0`), `a = 0.033 fm`.
+Tolerances were fixed before the runs. Numbers below are from the `cpu-serial` run; `cpu-openmp` and the GPU node give the same values (differences only in the last printed digit of rounding-level quantities, e.g. T8.0 Vieta 8.2e-16 vs 1.2e-15, T8.1 4.0e-16 vs 3.0e-16).
+
+| Test | Measured | Tolerance | Result |
+|---|---|---|---|
+| T8.0 `c0` (Eq. 34, g_g = 16, g_q = 12) | 0.127788 (paper 0.12779) | 5e-6 absolute | pass |
+| T8.0 cubic solver, 20000 random parameter sets (`lam_heat` 1e-4..10 fm, k 0.01..3.2): scaled residual of the cleared cubic / Vieta relations / uncleared Eq. 33 | 4.4e-16 / 8.2e-16 / 2.1e-12 | 1e-13 / 1e-12 / 1e-10 | pass |
+| T8.0 `lambda_visc`, `lambda_heat`, `eta`, `kappa` vs Eqs. 35-38; spline particle density (3 modes, unknown mode throws) | agree to 1e-14 | 1e-14 | pass |
+| T8.1 `kappa = xi = 0`, `rho = 6.957 rho_s`, `vs2 = -0.14794`: `gamma = sqrt(-vs2 k^2 - B k^4)`, damped partner `-gamma`, `Re w = 0` (89 unstable k) | 4.0e-16 relative | 1e-12 | pass |
+| T8.1 outside the unstable band and on a stable background (`rho = rho_s`): `Im w` | exactly 0 (purely real w) | 0 | pass |
+| T8.2 small `lam_visc = 1e-7 fm` (stable and unstable modes, k = 0.3, 0.8, 1.5 fm^-1): slope of `Im w` vs `lam_visc` against `-k^2/2` | 1.4e-7 relative | 1e-4 | pass |
+| T8.3a `kappa = 0` vs `kappa > 0` at `k = 1e-3 fm^-1` over a 210-point density scan: sign of `gamma` equals sign of `-vs2` (`kappa = 0`) and of `-vT2` (`kappa > 0`) | 210/210 and 210/210 (46 points with `vT2 < 0 < vs2`) | all points | pass |
+| T8.3b band `vT2 < 0 < vs2` (`rho = 1.255 rho_s`, `vT2 = -0.01518`, `vs2 = 0.01334`, `lam_heat = 0.2215 fm`): `gamma(k = 1e-3)` vs the small-k law `lam_heat k^2 |vT2|/vs2`; ideal `gamma <= 0` | 2.520888e-7 vs 2.520911e-7, relative 9.1e-6 | 1e-5 | pass |
+| T8.3c `rho = 6.957 rho_s`, `eta0 = 0`, `kappa0 = 1`: for `k` above the ideal maximum, `gamma_heat >= gamma_ideal` wherever either is positive | 0 violations of 480 points; `gamma_max` 0.7564 -> 1.0778 (k 2.78 -> 3.53); `k_cut` 3.93 -> 5.18 fm^-1 | no violation, `k_cut` larger, `gamma_max` not smaller | pass |
+| T8.4 Lalime solver, constant `gamma = 0.37`, `D = 0.021` vs Eq. 48 (41 steps) | 3.3e-15 relative | 1e-10 | pass |
+| T8.4 stable relaxation to `-D/gamma` (closed form 1.3e-16; exponential approach factor within 1e-9 of exact) | 1.3e-16 | 1e-12 | pass |
+| T8.4 `G_k` for constant unstable `gamma = 0.37` over 8 fm/c vs `exp(0.37 * 8)`; linear ramp through zero (node crossing and in-step crossing) vs the exact positive-part integral | 1.9e-15; 0 and 2.2e-16 | 1e-10; 1e-12 | pass |
+| T8.5 re-derivation from `t0 = 1.38 fm/c`, `k0 = 2.0 fm^-1`: `B = C rho0^2/h0`, `abs(vs)` | 0.03282 fm^2, 0.5124 (brief: 0.0328, 0.512) | 0.2 % | pass; no difference from the brief |
+| T8.5 library ideal curve with those numbers: `gamma_max`, `k` of the maximum | 0.72464 c/fm (t = 1.3800 fm/c), k = 2.0000 | 1e-6, 1e-3 relative | pass |
+| T8.5b digitised ideal curve of Fig. 2 vs library (rounded paper numbers): maximum distance in the (k, gamma) plane | 0.0105 (digitised `gamma_max` 0.7259 at k = 1.990; digitised end of the curve at k = 2.839, library `k_cut = 2.8284`) | 0.01 | **expected failure** (`doctest::should_fail`) |
+| T8.5c `(eta0, kappa0) = (1, 0)` curve: `lam_visc = (|S|/gamma - gamma)/k^2` constant over 105 digitised points | 0.1563 fm, relative scatter 1.3 %; library peak 0.5063 vs digitised 0.5067 | scatter 10 % | pass |
+| T8.5d predictions of `(0,1)` and `(1,1)` (see below), maximum distance to the digitised curve | (1,0) 0.0078; (0,1) 0.0049; (1,1) 0.0034 | 0.02 | pass |
+
+**T8.5b.** The cut-off of the ideal curve is `k_cut = sqrt(2) k0`, so the quoted `k0 = 2.0` (three digits) fixes it to about 0.4 %, i.e. 0.011 fm^-1; the digitised curve ends 0.011 fm^-1 beyond it. The first attempt used the vertical deviation at fixed `k` (0.115, ill-conditioned where the curve is vertical); the second (distance in the plane) gives 0.0105 against the tolerance 0.01 fixed beforehand. The test is kept as an expected failure with that comment; the numbers are not changed.
+
+**T8.5 and the finite-range strength (difference from the brief).** `B = C rho0^2/h0 = 0.0328 fm^2` with `C = a^2 m_N/rho_s` and the default `a = 0.033 fm` would require `h0 = a^2 m_N rho0^2/(rho_s B) = 0.2 GeV/fm^3` at `rho0 = 6.5 rho_s`; but `h0 >= m_N rho0 = 0.935 GeV/fm^3` for this fluid. With `h0 = m_N rho0` the same `B` implies `a = 0.0711 fm`, and `a = 0.033 fm` gives `B = 0.00708 fm^2` (a factor 4.6 smaller; for the same `|vs2|`, `gamma_max = |vs2|/(2 sqrt(B))` would be 1.56 c/fm instead of 0.72). The text of arXiv:1007.1448 does not state `C`; `a = 0.033 fm` is the value of the later papers (1209.2462, 1302.2956) that WP4 uses. For reproducing Figs. 2, 3, 6, 7 `gradient.a_fm` (or `C`) has to be set from the 1.38 fm/c, 2.0 fm^-1 pair once the finite-temperature table fixes `h0`.
+
+**T8.5d: the Fig. 2 curves without the finite-temperature table.** `lam_heat = kappa0 c0 d` does not contain `c_v`, and the cut-off of a heat-conducting curve is fixed by `vT2` alone (`gamma = 0` means `w = 0`, i.e. `vT2 k^2 + B k^4 = 0`). Inputs read from the digitised curves: `B`, `vs2` (ideal pair), `lam_visc = 0.1563 fm` (from the (1,0) curve; `d = 3 lam_visc/(4 c0) = 0.917 fm`, `n = 1.30 fm^-3` for `eta0 = 1`) and `vT2 = -B k_cut^2 = -0.3884` (`k_cut = 3.440` fm^-1 of the (0,1) curve). The prediction is `lam_heat = c0 d = 0.1172 fm = 0.75 lam_visc` (Eqs. 36 and 38 with `eta0 = kappa0 = 1`). The library then predicts the maxima of the `(0,1)` and `(1,1)` curves as 0.8651 (k = 2.29) and 0.6057 (k = 1.96) against the digitised 0.8649 and 0.6049. The ratio `lam_heat/lam_visc` is a genuine prediction; `vT2` and `lam_visc` are fitted inputs. What stays pending for the finite-temperature table: the values `vT2`, `vs2`, `c_v`, `h0`, `n` themselves at `(6.5 rho_s, 70 MeV)` (here `n = 1.30 fm^-3` and `vT2 = -0.388` are implied), and Figs. 3, 6, 7 (trajectories through the phase diagram).
+
+### Digitisation of arXiv:1007.1448 (`tools/digitise_1007_1448.py`, `tools/data/*.csv`, `docs/figures/digitise_fig*.png`)
+
+All figures of the paper that were requested are vector graphics (no raster images on the pages): Figs. 2, 3 (both panels), 4, 5, 6, 7 were digitised from the path operators of the PDF (frame, ticks, labels and curve vertices in the same coordinate system); the page raster is only the background of the check plots. Curves are identified by legend colour, dash pattern and marker.
+Accuracy: the linear map from page coordinates is fitted to all labelled major ticks; the fit residuals are 0.0003 fm^-1 (x, Fig. 2), 0.0002 c/fm (y, Fig. 2) and at most 0.0044 MeV (Fig. 3b, x) and 0.0067 MeV (Fig. 5, y); 1 PDF point corresponds to 0.018 fm^-1 and 0.0073 c/fm in Fig. 2, 0.078 fm/c and 0.015 fm^-3 in Fig. 4, 0.056 `rho/rho_s` and 1.09 MeV in Fig. 5. So the transcription error is far below the width of the line (about 1 point); the limiting accuracy is the vertex density of the paper's own paths (e.g. 17 vertices for the UrQMD curves).
+Independent checks: (1) the vertices of the UrQMD curves of Fig. 4 are plotted at integer times: deviation from the nearest integer rms 5.1e-4 fm/c, max 1.3e-3 fm/c; (2) Fig. 2 ideal peak 0.7259 at k = 1.990 and cut-off 2.839 against the paper's text (t0 = 1.38 fm/c -> 0.7246, k0 = 2.0, cut-off 2.828); (3) T8.5c-d above (internal consistency of four curves with the library).
+Files: `fig2_*` (4 curves), `fig3a_*`, `fig3b_*`, `fig4_rho_*` (3-fluid and UrQMD, 5 and 10 A GeV), `fig5_boundary_*` (coexistence, isothermal spinodal, isentropic spinodal; useful as references for the table), `fig5_traj_*` and `fig5_markers_*` (trajectories), `fig6_*` (`gamma_k(t)` for k = 2 fm^-1 with `eta0 = kappa0 = 1`), `fig7_Gk_*` (five curves).
+Derived trajectories for `spf_linear`: `trajectory_3fluid_5_markers.csv`, `trajectory_urqmd_5_markers.csv` and `trajectory_3fluid_5_dense.csv`. The markers of Fig. 5 are spaced by 1 fm/c (caption); the start time is not stated. Assigning marker `j` to `t = j` fm/c, `rho` at the markers agrees with the Fig. 4 density curve to rms 0.020 `rho_s` (3-fluid, markers 1..11) and 0.117 `rho_s` (UrQMD, markers 3..13). The first marker of the 3-fluid trajectory and the first three of the UrQMD trajectory lie at `rho/rho_s` = 2.50 and 2.76, 3.05, 3.51, whereas Fig. 4 gives 1.44 and 0.00, 0.42, 3.34 at those times: the paper plots the trajectory from about `rho = 2.5 rho_s` and either clips or rounds the early points. The time assignment is therefore an inference (provisional), the temperature `T(t)` is the paper's prescription read from the markers. In the dense 3-fluid file `rho(t)` comes from the Fig. 4 curve and `T(t)` is interpolated linearly between markers.
+
+### `spf_linear` smoke run (toy EoS, not comparable with the paper)
+`spf_linear linear.trajectory_csv=tools/data/trajectory_3fluid_5_dense.csv gradient.a_fm=0.07 linear.nk=40` (toy `rho_c = 5.6 rho_s`, `T_c = 142.5 MeV`, `eta0 = kappa0 = 1`): `G_k` peaks at 2.15 at k = 1.16 fm^-1 (9.5 fm/c unstable); the UrQMD marker trajectory gives 1.76 at k = 1.06 fm^-1. These numbers depend on the toy EoS and are not a reproduction of Figs. 6-7 (peak `G_k` of about 7.9 at k about 1.6 fm^-1 in the paper); that comparison needs the finite-temperature table.
+
+### Test totals (WP8)
+
+CPU (workstation, head b22de57 for the code): `ctest` 2/2 on `cpu-serial` (280 s) and on `cpu-openmp` (16 threads, 668 s); `spf_tests`: 77 test cases, 20809 assertions, 20800 passed, 9 failed; the nine failed assertions are the eight expected failures of WP4 (`doctest::may_fail`) and the one expected failure T8.5b (`should_fail`); no other failure. WP8 adds 9 test cases (T8.0, T8.1, T8.2, T8.3, T8.4, T8.5, T8.5b, T8.5c, T8.5d).
+GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4), head b22de57 built from a fresh clone of the branch: `ctest` 2/2 passed (`spf_tests` 54.2 s); 77 test cases, 20809 assertions, 20800 passed, 9 failed (the same nine expected failures); the `T8.` numbers on the GPU node coincide with the CPU values (the library runs on the host). `spf_linear` ran on the dense 3-fluid trajectory. The remote clone was deleted.
+
+## WP5 - initial conditions from a hadron cascade (2026-11-22)
+
+Documentation of the method: `docs/initial_state.md`. Code under test: `include/spf/initial_state.hpp`, `src/initial_state.cpp`, `apps/spf_ic.cpp`,
+`tests/test_initial_state.cpp`. SMASH 3.4.2 (Pythia 8.316) runs on the GPU node; the output files were read on the workstation and on the GPU node.
+Data: `data/ic/t52_summary.json`, `data/ic/t52_variants_3AGeV.json`, `data/ic/time_convention_3AGeV.json`.
+
+### T5.1 conservation of the deposition (tolerance 1e-10 relative)
+
+300 random hadrons (nucleons, antinucleons, mesons, hyperons, a deuteron; positions in +-6 fm, `|p_z|` up to 2.5 GeV), grid 48^3, `dx = 0.5` fm, box centred.
+Relative deviation of grid sum and particle sum; for `B` and `E` relative to the sum, for `p_x, p_y, p_z` relative to `sum |p_j|` (the vector sums nearly cancel).
+Largest value over `B, E, p_x, p_y, p_z` for each case; CPU (`cpu-serial`) / GPU (`cuda-turing75`):
+
+| sigma_init | contraction | CPU max dev. | GPU max dev. | stencils clipped | single-cell fallback |
+|---|---|---|---|---|---|
+| 1.0 | none | 1.3e-14 | 7.8e-17 | 0 | 0 |
+| 1.0 | particle_gamma_z | 1.1e-14 | 6.6e-17 | 0 | 0 |
+| 1.0 | cm_gamma | 6.4e-15 | 1.3e-16 | 0 | 0 |
+| 0.7 | none | 1.0e-14 | 1.3e-16 | 0 | 0 |
+| 0.7 | particle_gamma_z | 7.9e-15 | 5.6e-17 | 0 | 0 |
+| 0.7 | cm_gamma | 3.2e-15 | 1.3e-16 | 0 | 0 |
+| 0.5 | none | 1.9e-15 | 1.9e-16 | 0 | 0 |
+| 0.5 | particle_gamma_z | 2.7e-15 | 1.9e-16 | 0 | 1 |
+| 0.5 | cm_gamma | 5.9e-15 | 1.3e-16 | 0 | 0 |
+
+All 9 cases pass (tolerance 1e-10) on both backends. The one single-cell fallback (sigma 0.5, `particle_gamma_z`: a hadron with `gamma_z` large enough that the window of
+`+-4 sigma/gamma_z` holds no grid point of 0.5 fm) still conserves exactly. The CPU/GPU difference of the largest deviation reflects the summation order
+(atomic adds, parallel reductions). Further deposition tests: a clipped stencil is reported (a baryon at x = 7.5 fm in a +-8 fm box: outside fraction
+between 0.1 and 0.6, `n_particles_clipped = 1`), the z extent of a contracted Gaussian is below half of the uncontracted one (`gamma_z` = 3.2), the analytic
+counter-streaming state integrates to `2A = 416` (2e-3) and its centre equals `2 gamma_cm rho_0` (2e-3).
+
+### T5.2 SMASH Pb+Pb, b = 0, central state at `t_init` (reported measurement, not pass/fail)
+
+SMASH 3.4.2, cascade, `Fermi_Motion: frozen`, centre-of-velocity frame, seeds 1000 + E_lab; `R = 1.2 A^(1/3)` (7.110 fm); deposition `sigma_init = 1.0` fm,
+`particle_gamma_z`, `dx = 0.2` fm, 160^3 cells (200 x 200 x 240 at 1 A GeV). Central = cells with centre within 1 fm of the box centre (about 550 cells); rest-frame
+`rho`, `eps` after recovery with `cold_thermal_two_phase`; in units of `rho_s = 0.153 fm^-3`, `eps_s = 0.14382 GeV/fm^3`. Mean over events, (standard deviation over events), [min, max].
+Counter-streaming point: `(2 gamma_cm, sqrt(s_NN) gamma_cm / m_N)`. Cold curve: `eps_c(rho)/eps_s` from `data/eos/cold_curve.dat` (linear interpolation) at the mean central `rho`.
+(The 3 A GeV events of the CPU run were produced with the OpenMP build, the GPU run of event 0 gives the same central values: 4.9829 / 7.8421.)
+
+| E_lab [A GeV] | events | t_init [fm/c] | central rho/rho_s | central eps/eps_s | counter-streaming (rho, eps) | cold eps_c/eps_s at mean rho | B(abs y_cm < 0.5)/B |
+|---|---|---|---|---|---|---|---|
+| 1 | 5 | 19.50 | 3.14 (0.46) [2.52, 3.61] | 3.70 (0.62) [2.97, 4.34] | (2.48, 3.06) | 3.37 | 0.825 |
+| 2 | 5 | 13.79 | 4.58 (0.17) [4.31, 4.74] | 6.66 (0.47) [6.00, 7.32] | (2.87, 4.13) | 5.65 | 0.733 |
+| 3 | 20 | 11.26 | 5.04 (0.94) [3.55, 6.61] | 8.05 (1.40) [5.47, 10.13] | (3.22, 5.19) | 6.51 | 0.699 |
+| 4 | 5 | 9.75 | 5.69 (1.01) [4.97, 7.35] | 9.95 (1.85) [7.99, 12.82] | (3.54, 6.26) | 7.76 | 0.651 |
+| 5 | 5 | 8.72 | 5.64 (0.77) [4.94, 6.89] | 10.59 (1.80) [9.09, 13.40] | (3.83, 7.32) | 7.66 | 0.630 |
+| 6 | 5 | 7.96 | 5.00 (1.08) [3.40, 6.08] | 10.20 (1.66) [8.42, 12.02] | (4.09, 8.38) | 6.43 | 0.603 |
+
+Baryon number is 416 in every event (all 45 events); recovery failures 0, limiter cells 0, lost baryon fraction at most 9.1e-15 (2 to 6 A GeV, 160^3) and 5.6e-15 (1 A GeV, 200 x 200 x 240).
+At 3 A GeV the cold curve at the counter-streaming density `3.22 rho_s` gives `eps_c/eps_s = 3.48`, the counter-streaming `eps` is 5.19. Result: the SMASH central state at
+3 A GeV (5.04 `rho_s`, 8.05 `eps_s`, event-to-event spread 19 % and 17 %) is **not between** the counter-streaming point and the cold curve, as the plan expected: it lies at a higher density (baryon stopping and
+compression) and above the cold curve by 1.5 `eps_s` at its own density (thermal part), as the counter-streaming point does at its density (+1.7). Sensitivity at 3 A GeV (20 events, central rho/rho_s, eps/eps_s):
+contraction none 4.97 / 7.94, `particle_gamma_z` 5.04 / 8.05, `cm_gamma` 5.67 / 9.03; `sigma_init = 0.7` fm 5.70 / 9.00, `sigma_init = 0.5` fm 6.07 / 9.39 (`data/ic/t52_variants_3AGeV.json`).
+Fraction of baryon number at `|y_cm| < 0.5` at 3 A GeV: 0.699 (the Glauber-Gaussians fallback has 0: all nucleons sit at `+-y_cm = 1.04`).
+At 1 A GeV the 160^3 box is too small (lost baryon fraction 5e-6 to 2e-4: `spf_ic` stopped with the error message), which is why the 1 A GeV row uses a larger box.
+
+### T5.3 reader round trip and PDG rule (exact)
+
+Hand-written file `tests/data/oscar_3particles.oscar` (SMASH 3.4.2 format with `ensemble`, proton / anti-neutron / pi+): all 8 columns, pdg and the baryon numbers (+1, -1, 0)
+read back exactly (`==`), block kind, declared count 3, impact parameter 0, block selection by time. Second file written by the test (no `ensemble` word, other column order, an `in`
+block, two `out` blocks): pass. Malformed/missing file: exception. PDG rule: 28 ids (p, pbar, n, nbar, Lambda, Sigma, Xi, Omega and anti-Omega, Delta++, Delta(1232) 1114, Delta-bar, pi, K, eta, J/psi,
+photon, electron, diquarks 2101 and 1103, deuteron, anti-deuteron, He-4, Pb-208 = 1000822080, tritium, id 0): all correct. Pass on CPU and GPU.
+
+### T5.4 deposited SMASH state in Hydro3D for 2 fm/c (3 A GeV, event 0, 160^3, dx = 0.2 fm, periodic box, 25 steps)
+
+Run with `spf_ic --evolve 2.0` on the GPU node (CUDA) and on the workstation (OpenMP); same numbers up to the summation order. Counts over all sweeps and half-steps (a failing cell is counted at each recovery).
+GPU values (OpenMP in brackets where they differ):
+
+| eos.model | gradient.form | recovery failures during run | failing cells in the final state | limiter activations | R/R0, E/E0 after 2 fm/c |
+|---|---|---|---|---|---|
+| ideal | off | **0** | 0 | 2687637 (2687593) | 0.99999999994, 0.99999999999878 |
+| cold_thermal_two_phase | off | **0** | 0 | 1394952 (1395054) | 0.9999999997, 0.99999999999871 |
+| ideal | paper_pressure (default) | 588821 (589112) | 9485 (9488) | 2687993 (2687767) | same |
+| cold_thermal_two_phase | paper_pressure (default) | 270669 (270618) | 4302 (4316) | 1395124 (1395037) | same |
+
+The deposited state itself has 0 recovery failures and 0 limiter cells. **The acceptance criterion (no recovery failures) is met with the gradient term off and not met with the default `paper_pressure` term.**
+Where the failing cells are (final state, OpenMP run): radius 9.3 to 17.8 fm from the centre (ideal; 8.8 to 17.1 fm for the cold-thermal EoS), computational-frame density at most 0.021 `rho_s` (0.35 `rho_s`),
+energy density at most 0.175 `eps_s` (0.73 `eps_s`), `|M|/E = 1` to within 4e-16 (they sit on the `E >= |M|` limiter surface, `v = 1`), and together they carry 4.0e-4 of the 416 baryons (8.5e-3 for the cold-thermal EoS) and 3.8e-3 GeV of 641 GeV
+(2.0e-2 GeV). Probable cause (inferred from the failure condition in `recover_core` and from switching the term off; `p_extra` itself was not dumped; not fixed here): at the dilute leading edge the limiter saturates `|M| = E`; the recovery needs `E + p_extra - |M| >= 0` and
+`p_extra = p_grad` is negative there, so `recover_core` flags the cell (the recovery failure of the WP3 follow-up above, now with the finite-range pressure). The limiter
+activations are the same with the term on or off (so the `E >= |M|` violation at the fringe does not depend on the gradient term; it appears to come from the SHASTA transport of the cold fringe). The proxy test in `tests/test_initial_state.cpp`
+(Glauber-Gaussians state, 64^3, dx = 0.5 fm, 2 fm/c, 416 baryons) shows the same: gradient off, 0 failures for both EoS (limiter cells 156902 and 115202 on CPU); default term, 69022 and 60304 failures on CPU (69024 and 60235 on GPU).
+It is a `doctest::may_fail` test case (two expected failed assertions).
+
+### Time convention of SMASH (measured; details in `docs/initial_state.md`)
+
+First NN collision at 0.53 +- 0.45 fm/c (8 events; -0.18 to 1.06), central density maximum at 8.2 +- 1.4 fm/c; offset used by the driver: 0.
+
+### Test totals and GPU node (WP5)
+
+CPU (workstation, macOS arm64, head f473f68 plus documentation): `spf_tests` on `cpu-serial` and on `cpu-openmp` (16 threads): 76 test cases, 905 assertions, 895 passed, 10 failed; the 10 failed assertions
+belong to the test cases marked `doctest::may_fail` (8 from WP4, 2 from WP5: "T5.4 proxy: default gradient term (paper_pressure) fails in the dilute fringe", `test_initial_state.cpp` lines 223 and 225).
+`ctest` 2/2 on both presets (`cpu-serial` 268 s, `cpu-openmp` 937 s while other work ran). WP5 adds 8 test cases (`tests/test_initial_state.cpp`).
+
+GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4), head f473f686930372cd7c8cf2f297bea0d77351d763 built from a fresh clone of the branch: `ctest` 2/2 passed (54.9 s);
+`spf_tests`: 76 test cases, 905 assertions, 895 passed, 10 failed (the same expected failures). `spf_ic` on the SMASH event (3 A GeV, event 0, 160^3) runs on CUDA with the central values of the table in T5.4 / T5.2.
+Not run on the GPU: the 45-event T5.2 scan (run with the OpenMP build; the GPU run of event 0 gives the same central values to 4 digits).

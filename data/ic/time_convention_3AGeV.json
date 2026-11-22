@@ -1,0 +1,86 @@
+{
+ "per_event": [
+  {
+   "event": 0,
+   "first_nn_collision_fm": 0.760372,
+   "median_nn_collision_fm": 7.4474,
+   "t_max_central_density_fm": 9.0,
+   "max_central_density_over_rho_s_smoothed": 7.212250144469332,
+   "n_nn_collisions": 977
+  },
+  {
+   "event": 1,
+   "first_nn_collision_fm": 0.742109,
+   "median_nn_collision_fm": 7.13717,
+   "t_max_central_density_fm": 9.0,
+   "max_central_density_over_rho_s_smoothed": 5.902332917375543,
+   "n_nn_collisions": 825
+  },
+  {
+   "event": 2,
+   "first_nn_collision_fm": -0.0801538,
+   "median_nn_collision_fm": 7.10627,
+   "t_max_central_density_fm": 6.5,
+   "max_central_density_over_rho_s_smoothed": 4.993096253863384,
+   "n_nn_collisions": 811
+  },
+  {
+   "event": 3,
+   "first_nn_collision_fm": 0.964849,
+   "median_nn_collision_fm": 7.42778,
+   "t_max_central_density_fm": 10.0,
+   "max_central_density_over_rho_s_smoothed": 5.4708307719799425,
+   "n_nn_collisions": 831
+  },
+  {
+   "event": 4,
+   "first_nn_collision_fm": 0.469256,
+   "median_nn_collision_fm": 7.3202300000000005,
+   "t_max_central_density_fm": 9.5,
+   "max_central_density_over_rho_s_smoothed": 5.671171053770757,
+   "n_nn_collisions": 928
+  },
+  {
+   "event": 5,
+   "first_nn_collision_fm": 0.496938,
+   "median_nn_collision_fm": 7.4826999999999995,
+   "t_max_central_density_fm": 8.0,
+   "max_central_density_over_rho_s_smoothed": 5.979386871910472,
+   "n_nn_collisions": 844
+  },
+  {
+   "event": 6,
+   "first_nn_collision_fm": 1.05886,
+   "median_nn_collision_fm": 6.92428,
+   "t_max_central_density_fm": 6.0,
+   "max_central_density_over_rho_s_smoothed": 5.8406897537476,
+   "n_nn_collisions": 801
+  },
+  {
+   "event": 7,
+   "first_nn_collision_fm": -0.17642,
+   "median_nn_collision_fm": 6.935420000000001,
+   "t_max_central_density_fm": 7.5,
+   "max_central_density_over_rho_s_smoothed": 5.933154499189514,
+   "n_nn_collisions": 814
+  }
+ ],
+ "summary": {
+  "first_nn_collision_fm": {
+   "mean": 0.5294762749999999,
+   "std": 0.4540210268569122
+  },
+  "median_nn_collision_fm": {
+   "mean": 7.22265625,
+   "std": 0.22744405986888894
+  },
+  "t_max_central_density_fm": {
+   "mean": 8.1875,
+   "std": 1.4376940862764531
+  },
+  "max_central_density_over_rho_s_smoothed": {
+   "mean": 5.875364033288318,
+   "std": 0.6309961463029042
+  }
+ }
+}
