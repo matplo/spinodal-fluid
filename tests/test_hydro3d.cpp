@@ -624,3 +624,35 @@ TEST_CASE("Hydro3DParams from configuration") {
   cfg.set_from_string("shasta.sweep_order=bogus");
   CHECK_THROWS_AS(Hydro3DParams::from_config(cfg), ConfigError);
 }
+
+TEST_CASE("Gaussian blob expanding into vacuum: no primitive-recovery failures after the E >= |M| limiter") {
+  // Regression test: before the rounding cap in recover_core, cells rescaled to |M| = E by the limiter were flagged as
+  // recovery failures because |M| recomputed from three components exceeded E by one unit in the last place
+  // (25 failures by step 10 and 1529 by step 100 for this setup).
+  const int n = 48;
+  const Real dx = 0.2, c0 = 0.5 * n * dx;
+  Hydro3DParams hp = params_for(n, n, n, dx, "permuted", Boundary::Outflow);
+  Hydro3D<TestEosIdeal> h(TestEosIdeal{}, hp);
+  h.set_state_fn([&](int ix, int iy, int iz, Real& e, Real& r, Real& ux, Real& uy, Real& uz) {
+    const Real x = (ix + 0.5) * dx - c0, y = (iy + 0.5) * dx - c0, z = (iz + 0.5) * dx - c0;
+    const Real g = std::exp(-(x * x + y * y + z * z) / 2.0);  // width 1 fm
+    e = 2.0 * g;
+    r = 0.3 * g;
+    ux = uy = uz = 0.0;
+    if (e < 1e-30) e = 0.0;
+  });
+  h.run(100);
+  // After the limiter |M| may exceed E by rounding only: largest relative excess within the tolerance of the cap.
+  const std::vector<Real> Mx = h.interior_copy(h.U[1]), My = h.interior_copy(h.U[2]), Mz = h.interior_copy(h.U[3]),
+                          E = h.interior_copy(h.U[4]);
+  Real excess = 0.0;
+  for (size_t i = 0; i < E.size(); ++i) {
+    if (E[i] <= 0.0) continue;
+    const Real ma = std::sqrt(Mx[i] * Mx[i] + My[i] * My[i] + Mz[i] * Mz[i]);
+    excess = std::max(excess, ma / E[i] - 1.0);
+  }
+  std::printf("[WP3] vacuum expansion 48^3, 100 steps: recovery failures %ld, limiter clamps %ld, max(|M|/E - 1) = %.2e\n",
+              h.n_recover_fail_total, h.n_clamped_total, excess);
+  CHECK(h.n_recover_fail_total == 0);
+  CHECK(excess <= kRecover3MaTol);
+}

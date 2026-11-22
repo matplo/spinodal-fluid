@@ -49,6 +49,8 @@ struct Hydro3DParams {
 // iteration of recover_primitives (hydro1d.hpp), at most kRecover3MaxIter iterations. Output: speed c = |v| >= 0, eps, rho, p
 // (total pressure p0 + p_extra). Vacuum cells (E < e_vac) give everything 0. Returns 0 on success, 1 on failure.
 // p_extra must keep g(1) >= 0 (it does for p_extra >= 0 and for small negative values); otherwise the cell is flagged.
+inline constexpr Real kRecover3MaTol = 1e-12;  // relative excess of |M| over E treated as rounding
+
 template <class EoS>
 KOKKOS_INLINE_FUNCTION int recover_core(const EoS& eos, Real R, Real Ma, Real E, Real e_vac, Real pex, Real& eps, Real& rho,
                                         Real& c_out, Real& p) {
@@ -59,6 +61,10 @@ KOKKOS_INLINE_FUNCTION int recover_core(const EoS& eos, Real R, Real Ma, Real E,
     eps = E; rho = Rp; p = eos.p0(eps, rho) + pex;
     return 0;
   }
+  // The E >= |M| limiter (Enforce3K) rescales the momentum vector to |M| = E; recomputing |M| through the square root of
+  // three components can exceed E by a few units in the last place, which would leave no root in [0, 1] and flag the cell.
+  // Treat such an excess as rounding (relative 1e-12); a larger excess is a genuine violation and is still flagged.
+  if (Ma > E && Ma <= E * (1.0 + kRecover3MaTol)) Ma = E;
   Real a = 0.0, ga = -Ma;
   Real b = 1.0;
   Real gb;

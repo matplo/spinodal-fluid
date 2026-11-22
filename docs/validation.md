@@ -283,3 +283,17 @@ is met by a factor of about 22 for the ideal EoS and about 16.5 for `cold_therma
 Rerun on the fixed head 602437b (GPU node, Release `cuda-turing75`): `spf_tests` 46 cases / 533 assertions passed, `ctest` 2/2 (including the set_state regression test
 with `EosColdThermal` and `EosTable`). G2 Serial vs CUDA: worst max|a-b|/max|field| 1.647e-14, totals <= 1.736e-14 -> PASS (per-cell relative, information only: 5.8e-10).
 Ideal EoS CUDA timings reproduced: 0.06566 s (160^3), 0.5056 s (320^3) per step. Conservation in the benchmark runs: relative change <= 1.9e-16.
+
+### WP3 follow-up: primitive-recovery failures at vacuum fronts (found in the review of WP6, fixed)
+
+* Symptom: a Gaussian blob (ideal EoS, eps = 2 GeV/fm^3 peak, width 1 fm) expanding into vacuum on 48^3 with outflow boundaries gave
+  25 recovery failures by step 10 and 1529 by step 100.
+* Cause: the `E >= |M|` limiter rescales the momentum vector to `|M| = E`; `|M|` recomputed from three components can exceed `E` by one
+  unit in the last place (measured `|M|/E - 1 = 2.2e-16`), so `recover_core` found no root in [0, 1] and flagged the cell. In 1D `|M|` is a
+  single component, so the 1D solver was not affected.
+* Fix: `recover_core` treats a relative excess of `|M|` over `E` up to `kRecover3MaTol = 1e-12` as rounding; larger excesses are still flagged.
+* Result (macOS workstation, Serial and OpenMP): 0 failures in the same setup; largest `|M|/E - 1` after 100 steps 2.2e-16; regression test
+  "Gaussian blob expanding into vacuum" added (47 cases / 535 assertions pass).
+* The limiter itself acts at the expanding front (9320 times in 100 steps here). With `p = eps/3` the outer layer of the blob becomes
+  ultra-relativistic; in a 96^3 periodic box the clamped cells hold less than 1e-5 of the total energy until the front reaches the box boundary.
+  Collision runs should use outflow boundaries and a box large enough that the dense matter does not reach the boundary.
