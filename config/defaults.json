@@ -43,7 +43,28 @@
   "gradient": {
     "form": "paper_pressure",
     "a_fm": 0.033,
-    "in_primitive_recovery": "lagged"
+    "in_primitive_recovery": "lagged",
+    "stencil": "second_order",
+    "half_step_refresh": "lagged"
+  },
+  "growth": {
+    "rho0_rho_s": 5.8,
+    "eth_eps_s": 2.0,
+    "amp_rel": 0.0001,
+    "paper_perturbation": false,
+    "L_fm": 32.0,
+    "k_min_fm": 0.39,
+    "kdx_max": 1.2,
+    "a_list": "",
+    "dx_list": "",
+    "t_max_fm": 60.0,
+    "stop_factor": 3.6,
+    "fit_lo": 1.05,
+    "fit_hi": 3.0,
+    "stable_periods": 1.5,
+    "series_modes": "",
+    "output_csv": "growth.csv",
+    "series_csv": "growth_series.csv"
   },
   "ic": {
     "generator": "smash_cascade",
@@ -55,7 +76,16 @@
   },
   "obs": {
     "moment_density": "computational_frame",
-    "clump_rho_min_rho_s": 7.0
+    "clump_rho_min_rho_s": 7.0,
+    "clump_connectivity": 6,
+    "clump_hist_max": 25,
+    "fluid_end_eps_eps_s": 5.0,
+    "every_steps": 1,
+    "phase_rho_max_rho_s": 12.0,
+    "phase_rho_step_rho_s": 0.1,
+    "phase_eps_max_eps_s": 30.0,
+    "phase_eps_step_eps_s": 0.25,
+    "hist_times_fm": []
   },
   "linear": {
     "particle_density_in_spline_region": "linear_in_rho"
