@@ -38,10 +38,11 @@ struct Hydro3DParams {
     if (so == "permuted") p.order = SweepOrder::Permuted;
     else if (so == "fixed") p.order = SweepOrder::Fixed;
     else throw ConfigError("shasta.sweep_order must be 'permuted' or 'fixed', got '" + so + "'");
-    p.nx = cfg.get<int>("grid.nx");
-    p.ny = cfg.get<int>("grid.ny");
-    p.nz = cfg.get<int>("grid.nz");
-    p.dx = cfg.get<Real>("grid.dx_fm");
+    const GridCells gc = grid_cells(cfg);  // grid.nx/ny/nz, or grid.Lx_fm/Ly_fm/Lz_fm divided by grid.dx_fm
+    p.nx = gc.n[0];
+    p.ny = gc.n[1];
+    p.nz = gc.n[2];
+    p.dx = gc.dx;
     p.snapshot_every = cfg.get<long>("output.snapshot_every");
     return p;
   }

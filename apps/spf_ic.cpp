@@ -121,7 +121,8 @@ int main(int argc, char** argv) {
       if (!cfgfile.empty()) cfg.merge_file(cfgfile);
       for (const auto& s : overrides) cfg.set_from_string(s);
       cfg.echo(out);
-      const spf::Grid grid = spf::Grid::make_3d(cfg.get<int>("grid.nx"), cfg.get<int>("grid.ny"), cfg.get<int>("grid.nz"), cfg.get<double>("grid.dx_fm"));
+      const spf::GridCells gc = spf::grid_cells(cfg);
+      const spf::Grid grid = spf::Grid::make_3d(gc.n[0], gc.n[1], gc.n[2], gc.dx);
       const spf::InitialState st = spf::build_initial_state(cfg, grid);
       nlohmann::json j;
       spf::with_eos(cfg, SPF_SOURCE_DIR, [&](const auto& eos) { j = run(cfg, eos, grid, st, out, evolve_fm, snapshot); });
