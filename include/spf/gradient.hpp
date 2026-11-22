@@ -35,6 +35,9 @@ struct GradientParams {
   GradientHalfStep half_step = GradientHalfStep::Lagged;
   Real rho_s = 0.153;                     // fm^-3
   Real m_N = 0.940;                       // GeV
+  // Floor on the extra pressure inside the primitive recovery (gradient.pex_floor_kappa): p_extra >= -kappa (E - |M| + p0(E - |M|, 0)),
+  // which keeps a root of the recovery equation for 0 <= kappa < 1. Negative kappa disables the floor (library default).
+  Real pex_floor_kappa = -1.0;
 
   // a^2 eps_s / rho_s^2 = a^2 m_N / rho_s   [GeV fm^-1... such that coef * rho * Lap(rho) is in GeV/fm^3]
   Real coef() const { return a_fm * a_fm * m_N / rho_s; }
@@ -61,6 +64,10 @@ struct GradientParams {
     if (hs == "lagged") g.half_step = GradientHalfStep::Lagged;
     else if (hs == "midpoint") g.half_step = GradientHalfStep::Midpoint;
     else throw ConfigError("gradient.half_step_refresh must be 'lagged' or 'midpoint', got '" + hs + "'");
+    if (cfg.has("gradient.pex_floor_kappa")) {
+      g.pex_floor_kappa = cfg.get<Real>("gradient.pex_floor_kappa");
+      if (g.pex_floor_kappa >= 1.0) throw ConfigError("gradient.pex_floor_kappa must be < 1 (negative disables the floor)");
+    }
     g.rho_s = cfg.get<Real>("constants.rho_s_fm3");
     g.m_N = cfg.get<Real>("constants.m_N_GeV");
     return g;

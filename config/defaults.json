@@ -45,7 +45,8 @@
     "a_fm": 0.033,
     "in_primitive_recovery": "lagged",
     "stencil": "second_order",
-    "half_step_refresh": "lagged"
+    "half_step_refresh": "lagged",
+    "pex_floor_kappa": 0.5
   },
   "growth": {
     "rho0_rho_s": 5.8,
