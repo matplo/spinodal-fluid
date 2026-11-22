@@ -351,5 +351,5 @@ for `gamma_k >= 0` the paper only says that the coupling "continually produces a
 (zero if the trajectory starts unstable). A user-supplied `D_k(i, t, gamma)` replaces this.
 
 ### Fig. 2 numbers
-Ideal case (`nu = q = 0`, `vT2 = vs2 < 0`): `gamma^2 = |vs2| k^2 - B k^4` is maximal at `k0^2 = |vs2|/(2B)` with `gamma_max = |vs2|/(2 sqrt(B))`, and vanishes at `k_cut = 2 sqrt(2) k0`.
+Ideal case (`nu = q = 0`, `vT2 = vs2 < 0`): `gamma^2 = |vs2| k^2 - B k^4` is maximal at `k0^2 = |vs2|/(2B)` with `gamma_max = |vs2|/(2 sqrt(B))`, and vanishes at `k_cut = sqrt(2) k0`.
 From `t0 = 1.38 fm/c`, `k0 = 2.0 fm^-1`: `B = (1/t0)^2/k0^4 = 0.03282 fm^2`, `|vs2| = 2 B k0^2 = 0.2626`, `|vs| = 0.5124`.

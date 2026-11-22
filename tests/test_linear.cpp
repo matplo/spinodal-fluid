@@ -275,7 +275,7 @@ TEST_CASE("T8.5 ideal-fluid numbers of the paper's Fig. 2 point") {
 
 // T8.5b: expected failure, kept on purpose (rule: a failing acceptance test is reported, not loosened). The tolerance 0.01 was fixed before
 // the comparison. Measured: max distance 0.0105 (k = 2.830, where the digitised curve ends 0.011 fm^-1 beyond the library cut-off 2.8284).
-// The cut-off follows from the rounded paper numbers (t0 = 1.38 fm/c, k0 = 2.0 fm^-1): k_cut = sqrt(|vs2|/B) = 2 sqrt(2) k0, so 0.4 % in k0
+// The cut-off follows from the rounded paper numbers (t0 = 1.38 fm/c, k0 = 2.0 fm^-1): k_cut = sqrt(|vs2|/B) = sqrt(2) k0, so 0.4 % in k0
 // moves it by 0.011. A first attempt with the vertical deviation at fixed k gave 0.115 (ill-conditioned where the curve is vertical).
 TEST_CASE("T8.5b digitised ideal curve of Fig. 2 vs library with the rounded paper numbers" * doctest::should_fail()) {
 #ifdef SPF_SOURCE_DIR
