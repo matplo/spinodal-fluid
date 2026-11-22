@@ -92,6 +92,21 @@ def _f_at(T, rho, mode):
     return M.f(T, r)[0][0]
 
 
+def _exact_state(args):
+    """f, mu, s of the construction (or of the Maxwell partner) evaluated exactly at (T, rho); returns eps, p, mu (GeV, fm) and s."""
+    T, rho, mode = args; M = _model(); r = np.array([rho]); res = None
+    if mode == "maxwell" and T < 150.0:
+        import make_finite_T_table as Mk
+        pr = Mk.maxwell_pair(M, float(T))
+        if pr is not None and pr[0]*E.rhos < rho < pr[1]*E.rhos:
+            g = M.fs(T, np.array([pr[0], pr[1]])*E.rhos); lam = (rho/E.rhos - pr[0])/(pr[1] - pr[0])
+            f = g["f"][0] + g["mu"][0]*(rho - pr[0]*E.rhos); mu = g["mu"][0]; s_ = (1 - lam)*g["s"][0] + lam*g["s"][1]; res = (f, mu, s_)
+    if res is None:
+        g = M.fs(T, r); res = (g["f"][0], g["mu"][0], g["s"][0])
+    f, mu, s_ = res
+    return dict(eps=(f + T*s_)*1e-3, p=(mu*rho - f)*1e-3, mu=mu*1e-3, s=s_)
+
+
 def _fd_s(args):
     T, rho, h, mode = args
     f = [_f_at(T + k*h, rho, mode) for k in (-2, -1, 1, 2)]
@@ -128,6 +143,35 @@ def main():
         out[k] = dict(max_rel=float(rel.max()), median_rel=float(np.median(rel)), argmax=dict(T_MeV=float(args[rel.argmax()][0]), y=float(args[rel.argmax()][1]/RHO_S)),
                       T_min_MeV=float(min(q[0] for q in args)), T_max_MeV=float(max(q[0] for q in args)))
     R["C2"] = out
+    # C2b: table values against the exact evaluation of the construction at the inverted T (random nodes and the nodes with the largest
+    # change under halving of the T grid), eps_exact(T*) against the lattice eps, p0 and mu relative to max(|value|, 1 MeV)
+    import make_finite_T_table as Mk
+    dm2 = Mk.dmu_dT_two_phase(can["eos_two_phase"]); R["C2b"] = {}; R["C8"] = {}
+    for k, t in tabs.items():
+        zc = can[k]; kc = Mk._kink_columns(a.work, k[4:], 1) if os.path.exists(os.path.join(a.work, "kinks_" + k[4:] + ".npz")) else None
+        dmk = dm2 if k == "eos_two_phase" else Mk.dmu_dT_maxwell(zc, dm2)
+        idx = np.r_[np.arange(0, len(zc["T"]) - 1, 2), len(zc["T"]) - 1]; zh = {q: (zc[q][idx] if q in ("T", "f", "mu", "s") else zc[q]) for q in zc}
+        A_ = Mk.build_arrays(zh, tp.dx, tp.nx, dmk[idx], kc)       # halved T grid (kink nodes kept)
+        abt = (np.arange(t.nx)[:, None]*t.dx*EPS_S >= t.emin[None, :]); out8 = {}
+        for q, name, floor in ((0, "p0", 1e-3), (1, "T", 0.0), (2, "mu", 1e-3), (3, "s", 0.0)):
+            ref = t.F[name if name != "p0" else "p0"]; d = np.abs(ref - A_[q]); sc = np.maximum(np.abs(ref), floor if floor else 1e-300); r_ = np.where(abt, d/sc, 0.0)
+            i_, j_ = np.unravel_index(r_.argmax(), r_.shape)
+            out8[name] = dict(max_rel=float(r_.max()), n_above_1e6=int((r_ > 1e-6).sum()), at=dict(x=float(i_*t.dx), y=float(j_*t.dy), T_MeV=float(t.F["T"][i_, j_]*1000)))
+        R["C8"][k] = dict(final_table_vs_halved_unrefined_grid=out8, refinement_report=t.h.get("generator", {}).get("exact_refinement"))
+        rng2 = np.random.default_rng(77); cand = np.argwhere(abt & (t.F["T"] > 0.002) & (t.F["T"] < 0.249)); sel = cand[rng2.choice(len(cand), 150, replace=False)]
+        # stress nodes: largest p0 change under halving
+        ref = t.F["p0"]; r_ = np.where(abt, np.abs(ref - A_[0])/np.maximum(np.abs(ref), 1e-3), 0.0); top = np.argsort(r_.ravel())[-24:]
+        stress = np.array([np.unravel_index(q, r_.shape) for q in top]); allsel = np.vstack([sel, stress])
+        args = [(t.F["T"][i, j]*1000, y[j]*E.rhos, "maxwell" if k == "eos_maxwell" else "two_phase") for i, j in allsel]
+        with mp.get_context("fork").Pool(a.nproc) as pool: ex = pool.map(_exact_state, args, chunksize=1)
+        def stats(ids):
+            e = [ex[q] for q in ids]; nodes = [tuple(allsel[q]) for q in ids]
+            et = np.array([i*t.dx*EPS_S for i, j in nodes]); er = np.array([abs(v["eps"] - w)/w for v, w in zip(e, et)])
+            pe = np.array([abs(v["p"] - t.F["p0"][i, j])/max(abs(v["p"]), 1e-3) for v, (i, j) in zip(e, nodes)])
+            me = np.array([abs(v["mu"] - t.F["mu"][i, j])/max(abs(v["mu"]), 1e-3) for v, (i, j) in zip(e, nodes)])
+            se = np.array([abs(v["s"] - t.F["s"][i, j])/abs(v["s"]) for v, (i, j) in zip(e, nodes)])
+            return dict(n=len(ids), eps_rel=float(er.max()), p0_rel=float(pe.max()), mu_rel=float(me.max()), s_rel=float(se.max()))
+        R["C2b"][k] = dict(random=stats(range(len(sel))), stress=stats(range(len(sel), len(allsel))))
     # C3
     for k, t in tabs.items():
         c = can[k]; eps_node = c["f"] + c["T"][:, None]*c["s"]; d_eps = np.diff(eps_node, axis=0)

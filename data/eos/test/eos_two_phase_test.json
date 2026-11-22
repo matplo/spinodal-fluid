@@ -30,11 +30,30 @@
     "eps_min": "GeV/fm^3"
   },
   "bin_size_bytes": 1294440,
-  "sha256": "14493be6d8aaaa270152070781a61d182ad3bee5e0b51ba66d0a7af5b87542e0",
+  "sha256": "b4606bf8e8abb6c110bcb1c4463f6a0f0fe5eb67d896a61d32a530f18451f690",
   "generator": {
     "tool": "tools/eos/finite_T/make_finite_T_table.py",
     "construction": "smoothmax_floor",
-    "T_grid_points": 602,
-    "T_max_MeV": 250.0
+    "T_grid_points": 2361,
+    "T_max_MeV": 250.0,
+    "kink_nodes": true,
+    "exact_refinement": {
+      "threshold": 1e-06,
+      "halving_change_max_before": {
+        "p0": 7.007314652251914e-07,
+        "T": 2.950501661993613e-07,
+        "mu": 2.919893432275595e-07,
+        "s": 1.8394408763628496e-09
+      },
+      "nodes_refined": 0,
+      "nodes_above_cold_curve": 27988,
+      "halving_change_max_unrefined_nodes": {
+        "p0": 7.007314652251914e-07,
+        "T": 2.950501661993613e-07,
+        "mu": 2.919893432275595e-07,
+        "s": 1.8394408763628496e-09
+      },
+      "max_energy_residual_of_refined": 0.0
+    }
   }
 }

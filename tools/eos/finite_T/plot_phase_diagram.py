@@ -21,7 +21,7 @@ ROOT = os.path.abspath(os.path.join(here, "..", "..", ".."))
 RHOS, EPS_S = E.rhos, E.eps_s
 plt.rcParams.update({"font.size": 8, "axes.labelsize": 8, "xtick.labelsize": 6, "ytick.labelsize": 6, "legend.fontsize": 7, "xtick.direction": "out",
                      "ytick.direction": "out", "axes.spines.top": False, "axes.spines.right": False, "legend.frameon": False, "savefig.dpi": 150})
-C_COEX, C_SPIN, C_PURE, C_CP = "#1f4e9c", "#c46a00", "#7a7a7a", "#b00020"
+C_COEX, C_SPIN, C_PURE, C_CP, C_ISEN = "#1f4e9c", "#c46a00", "#7a7a7a", "#b00020", "#2a8a3c"
 _M = None
 
 
@@ -63,13 +63,27 @@ def main():
             sp_elo.append(np.interp(r[0], y, eps_node[i])/EPS_S); sp_ehi.append(np.interp(r[-1], y, eps_node[i])/EPS_S)
     sp_T = np.array(sp_T)
     Tcn = Tg[has]; r1, r2 = hull[has, 0], hull[has, 1]; e1 = (hull[has, 4] + Tcn*hull[has, 6])/EPS_S; e2 = (hull[has, 5] + Tcn*hull[has, 7])/EPS_S
+    # isentropic spinodal (v_s^2 = 0 at fixed s/rho) from the canonical lattice; digitised boundaries of arXiv:1007.1448 Fig. 5
+    rr = y*RHOS; Pc = t["mu"]*rr - t["f"]
+    dTc = lambda A_: np.gradient(A_, Tg, axis=0); dRc = lambda A_: np.gradient(A_, rr, axis=1)
+    with np.errstate(all="ignore"):
+        VS = dTc(Pc)/dTc(eps_node) + (rr[None, :]/(eps_node + Pc))*(dRc(Pc) - dTc(Pc)*dRc(eps_node)/dTc(eps_node))
+    VS = np.where((y[None, :] >= 1.5) & np.isfinite(VS), VS, np.nan)
+    paper = {}
+    for nm in ("coexistence", "isothermal_spinodal", "isentropic_spinodal"):
+        rows = [l.strip().split(",") for l in open(os.path.join(ROOT, "tools", "data", f"fig5_boundary_{nm}.csv")) if not l.startswith("#")][1:]
+        paper[nm] = np.array([[float(q) for q in r] for r in rows if len(r) == 2])
     # (i)
-    fig, ax = plt.subplots(figsize=(5.2, 3.6))
+    fig, ax = plt.subplots(figsize=(5.6, 3.9))
+    cs = ax.contour(y, Tg, VS, levels=[0.0], colors=[C_ISEN], linewidths=1.4)
+    ax.plot([], [], color=C_ISEN, lw=1.4, label=r"isentropic spinodal ($v_s^2 = 0$), this work")
+    for nm, ls_ in (("coexistence", "-"), ("isothermal_spinodal", "--"), ("isentropic_spinodal", ":")):
+        ax.plot(paper[nm][:, 0], paper[nm][:, 1], color="k", ls=ls_, lw=0.9, label="arXiv:1007.1448 Fig. 5: " + nm.replace("_", " "))
     ax.plot(pure["rhoH"]/RHOS, pure["T"], color=C_PURE, ls="--", lw=1); ax.plot(pure["rhoQ"]/RHOS, pure["T"], color=C_PURE, ls="--", lw=1, label="pure-phase coexistence")
     ax.plot(r1, Tcn, color=C_COEX, lw=1.6); ax.plot(r2, Tcn, color=C_COEX, lw=1.6, label="two-phase coexistence")
     ax.plot(sp_lo, sp_T, color=C_SPIN, lw=1.2); ax.plot(sp_hi, sp_T, color=C_SPIN, lw=1.2, label="isothermal spinodal")
     ax.plot([rhoc], [Tc], "o", color=C_CP, ms=5, label=f"critical point ({Tc:.1f} MeV, {rhoc:.2f}" + r" $\rho_s$)")
-    ax.set_xlim(0, 12); ax.set_ylim(0, 165); ax.set_xlabel(r"$\rho/\rho_s$"); ax.set_ylabel("T (MeV)"); ax.legend(loc="lower right")
+    ax.set_xlim(0, 12); ax.set_ylim(0, 165); ax.set_xlabel(r"$\rho/\rho_s$"); ax.set_ylabel("T (MeV)"); ax.legend(loc="upper right", fontsize=5.5)
     ax.set_title("Coexistence and spinodal region close at one critical point", loc="left", fontsize=8)
     fig.tight_layout(); fig.savefig(os.path.join(a.out, "eos_phase_T_rho.png")); plt.close(fig)
     # (ii)
