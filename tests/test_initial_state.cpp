@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <random>
 #include <string>
 #include <vector>
@@ -64,6 +65,23 @@ TEST_CASE("T5.3 OSCAR2013 reader round trip") {
   CHECK(p[1].pdg == -2112); CHECK(p[1].B == -1); CHECK(p[1].z == -3.5); CHECK(p[1].pz == -1.1);
   CHECK(p[2].pdg == 211); CHECK(p[2].B == 0); CHECK(p[2].E == 0.359);
   CHECK(find_oscar_block(f, 0, -1.0).particles.size() == 3);
+  {
+    // block header without the "ensemble" word, column order taken from the header line (pdg before t)
+    const std::string tmp = "oscar_variant_test.oscar";
+    std::ofstream o(tmp);
+    o << "#!OSCAR2013 particle_lists pdg t x y z mass p0 px py pz\n# event 3 in 1\n2212 0.5 1 2 3 0.938 1.2 0.1 0.2 0.3\n"
+         "# event 3 out 1\n2212 1.5 1 2 3 0.938 1.2 0.1 0.2 0.3\n# event 3 out 1\n-3122 2.5 4 5 6 1.116 1.4 0.1 0.2 0.3\n"
+         "# event 3 end 0 impact 1.500 scattering_projectile_target yes\n";
+    o.close();
+    const OscarFile g = read_oscar2013(tmp);
+    REQUIRE(g.blocks.size() == 3);
+    CHECK(g.blocks[0].kind == "in");
+    CHECK(find_oscar_block(g, 3, -1.0).particles[0].pdg == -3122);
+    CHECK(find_oscar_block(g, 3, -1.0).particles[0].B == -1);
+    CHECK(find_oscar_block(g, 3, 1.4).time == 1.5);
+    CHECK(g.impact_parameter.at(0) == 1.5);
+    std::remove(tmp.c_str());
+  }
   CHECK(find_oscar_block(f, 0, 11.0).time == 11.25);
   CHECK_THROWS(find_oscar_block(f, 1, -1.0));
   CHECK_THROWS(read_oscar2013(std::string(SPF_TEST_DATA_DIR) + "/does_not_exist.oscar"));

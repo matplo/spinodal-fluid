@@ -441,6 +441,18 @@ class Hydro3D {
     write_snapshot_files(base, grid.n, grid.dx, time, steps, names, data, config_echo);
   }
 
+  // Failure flags of the most recent recovery (update_primitives or a sweep), as a host vector like interior_copy (1 = failed).
+  std::vector<int> fail_flags_copy() const {
+    auto h = Kokkos::create_mirror_view(fail_);
+    Kokkos::deep_copy(h, fail_);
+    std::vector<int> out(static_cast<size_t>(idx_n()));
+    size_t q = 0;
+    for (int ix = 0; ix < grid.n[0]; ++ix)
+      for (int iy = 0; iy < grid.n[1]; ++iy)
+        for (int iz = 0; iz < grid.n[2]; ++iz) out[q++] = h(grid.g[0] + ix, grid.g[1] + iy, grid.g[2] + iz);
+    return out;
+  }
+
   // Interior of a field as a host vector, C order [ix][iy][iz].
   std::vector<Real> interior_copy(const Field3& F) const {
     auto h = Kokkos::create_mirror_view(F);

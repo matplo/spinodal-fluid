@@ -41,6 +41,9 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--smash", required=True, help="path of the smash executable")
     ap.add_argument("--smash-wrapper", default="", help="command prefix, e.g. 'micromamba run -n spf-smash' (libraries of the build env)")
+    ap.add_argument("--ld-library-path", default="", help="prepended to the library search path of SMASH: the lib directory of the conda "
+                    "environment it was built in (only needed if the binary was not patched with patchelf, see BUILD.md; "
+                    "an RPATH entry in the binary takes precedence over it)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--radius-mode", default="r0_A13", choices=["r0_A13", "fixed"])
     ap.add_argument("--radius", type=float, default=0.0, help="explicit R [fm] overrides --radius-mode")
@@ -67,6 +70,8 @@ def main():
     cfg = tpl.substitute(end_time=end_time, seed=a.seed, nevents=a.nevents, ekin=a.ekin, fermi_motion=a.fermi_motion,
                          initial_distance=a.initial_distance, output_times="[" + ", ".join(str(t) for t in times) + "]",
                          collisions_block=coll)
+    a.out = os.path.abspath(a.out)
+    a.smash = os.path.abspath(a.smash)
     os.makedirs(a.out, exist_ok=True)
     cpath = os.path.join(a.out, "smash_config.yaml")
     open(cpath, "w").write(cfg)
@@ -79,7 +84,11 @@ def main():
     if a.dry_run:
         return 0
     with open(os.path.join(a.out, "smash.log"), "w") as log:
-        rc = subprocess.call(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=os.path.dirname(a.smash))
+        env = dict(os.environ)
+        if a.ld_library_path:
+            old = env.get("LD_LIBRARY_PATH", "")
+            env["LD_LIBRARY_PATH"] = a.ld_library_path + (":" + old if old else "")
+        rc = subprocess.call(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=os.path.dirname(a.smash), env=env)
     if rc != 0:
         print("SMASH failed, see", os.path.join(a.out, "smash.log"), file=sys.stderr)
     return rc

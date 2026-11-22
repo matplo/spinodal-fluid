@@ -49,10 +49,10 @@ OscarFile read_oscar2013(const std::string& path) {
     if (line.rfind("#!OSCAR2013", 0) == 0) {
       f.format_line = line;
       const auto w = split_ws(line);
-      // "#!OSCAR2013 particle_lists <code> <version?> t x y z ..." : the column names are the tokens from the first "t" on
+      // "#!OSCAR2013 particle_lists [<code> <version>] t x y z ..." : the column names start at the first known column name
       size_t k0 = 0;
-      for (size_t i = 0; i < w.size(); ++i)
-        if (w[i] == "t") { k0 = i; break; }
+      for (size_t i = 2; i < w.size(); ++i)
+        if (w[i] == "t" || w[i] == "x" || w[i] == "pdg" || w[i] == "p0" || w[i] == "mass" || w[i] == "ID") { k0 = i; break; }
       if (k0 > 0) {
         col.clear();
         for (size_t i = k0; i < w.size(); ++i) col[w[i]] = static_cast<int>(i - k0);
@@ -61,15 +61,18 @@ OscarFile read_oscar2013(const std::string& path) {
     }
     if (line[0] == '#') {
       const auto w = split_ws(line.substr(1));
-      if (w.size() >= 4 && w[0] == "event" && (w[2] == "out" || w[2] == "in")) {
+      // "event N [ensemble E] in|out M" opens a block, "event N [ensemble E] end 0 impact b ..." closes the event
+      size_t k = 2;
+      if (w.size() > 4 && w[0] == "event" && w[2] == "ensemble") k = 4;
+      if (w.size() >= k + 2 && w[0] == "event" && (w[k] == "out" || w[k] == "in")) {
         f.blocks.emplace_back();
         cur = &f.blocks.back();
         cur->event = std::stoi(w[1]);
-        cur->kind = w[2];
-        cur->n_declared = std::stol(w[3]);
-      } else if (w.size() >= 4 && w[0] == "event" && w[2] == "end") {
+        cur->kind = w[k];
+        cur->n_declared = std::stol(w[k + 1]);
+      } else if (w.size() >= k + 1 && w[0] == "event" && w[k] == "end") {
         cur = nullptr;
-        for (size_t i = 3; i + 1 < w.size(); ++i)
+        for (size_t i = k + 1; i + 1 < w.size(); ++i)
           if (w[i] == "impact") { f.impact_parameter.push_back(std::stod(w[i + 1])); break; }
       }
       continue;
@@ -408,7 +411,11 @@ InitialState build_initial_state(const Config& cfg, const Grid& grid) {
     const std::string path = cfg.get<std::string>("ic.oscar_path");
     if (path.empty()) throw std::runtime_error("ic.generator = '" + st.generator + "' needs ic.oscar_path");
     const OscarFile f = read_oscar2013(path);
-    const OscarBlock& b = find_oscar_block(f, cfg.get<int>("ic.oscar_event"), cfg.get<Real>("ic.oscar_time_fm"));
+    // time of the block: ic.oscar_time_fm if >= 0; otherwise, for smash_cascade, the block nearest to t_init + ic.smash_time_offset_fm
+    // (SMASH writes the particle list at the output time and once more at the end time); for oscar_file the last "out" block.
+    Real t_sel = cfg.get<Real>("ic.oscar_time_fm");
+    if (t_sel < 0.0 && st.generator == "smash_cascade") t_sel = st.t_init_fm + cfg.get<Real>("ic.smash_time_offset_fm");
+    const OscarBlock& b = find_oscar_block(f, cfg.get<int>("ic.oscar_event"), t_sel);
     parts = b.particles;
     st.oscar_time_fm = b.time;
   } else if (st.generator == "glauber_gaussians") {

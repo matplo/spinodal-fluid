@@ -1,5 +1,5 @@
 // WP5: initial state for the fluid stage.
-//   spf_ic [--out DIR] [--config FILE] [--evolve T_fm] [key=value ...]
+//   spf_ic [--out DIR] [--config FILE] [--evolve T_fm] [--no-snapshot] [key=value ...]
 // ic.generator = smash_cascade | oscar_file | glauber_gaussians | analytic (see docs/initial_state.md). Deposits the hadrons on the
 // grid, applies the E >= |M| limiter, hands the conserved fields to Hydro3D, recovers the primitives with the equation of state of
 // eos.model, writes the Hydro3D snapshot <DIR>/ic_state.{bin,json} and the summary <DIR>/ic_summary.json.
@@ -16,14 +16,14 @@
 namespace {
 
 template <class EoS>
-nlohmann::json run(const spf::Config& cfg, const EoS& eos, const spf::Grid& grid, const spf::InitialState& st, const std::string& out, double evolve_fm) {
+nlohmann::json run(const spf::Config& cfg, const EoS& eos, const spf::Grid& grid, const spf::InitialState& st, const std::string& out, double evolve_fm, bool snapshot) {
   using spf::Real;
   const spf::Hydro3DParams hp = spf::Hydro3DParams::from_config(cfg);
   spf::Hydro3D<EoS> h(eos, hp);
   h.set_conserved(st.dep.R, st.dep.Mx, st.dep.My, st.dep.Mz, st.dep.E);
   const long fail = h.update_primitives();
   const std::vector<std::string> fields = {"R", "Mx", "My", "Mz", "E", "eps", "rho", "vx", "vy", "vz", "p"};
-  h.write_snapshot(out + "/ic_state", fields, cfg.json());
+  if (snapshot) h.write_snapshot(out + "/ic_state", fields, cfg.json());
   const auto eps = h.interior_copy(h.eps), rho = h.interior_copy(h.rho);
   const int nx = grid.n[0], ny = grid.n[1], nz = grid.n[2];
   const auto o = spf::centred_origin(grid);
@@ -56,7 +56,7 @@ nlohmann::json run(const spf::Config& cfg, const EoS& eos, const spf::Grid& grid
     const auto t0 = h.totals();
     h.run(nsteps);
     const auto t1 = h.totals();
-    h.write_snapshot(out + "/ic_evolved", fields, cfg.json());
+    if (snapshot) h.write_snapshot(out + "/ic_evolved", fields, cfg.json());
     const Real v = grid.dx * grid.dx * grid.dx;
     const long fail_final = h.update_primitives();
     j["evolve"] = {{"requested_fm", evolve_fm}, {"steps", nsteps}, {"time_fm", h.time},
@@ -64,13 +64,34 @@ nlohmann::json run(const spf::Config& cfg, const EoS& eos, const spf::Grid& grid
                    {"recovery_failures_final_state", fail_final},
                    {"limiter_activations_during_run", h.n_clamped_total - c0},
                    {"E_over_E0", t1.E / t0.E}, {"R_over_R0", t1.R / t0.R}, {"R_end_x_dx3", t1.R * v}, {"E_end_x_dx3", t1.E * v}};
-    if (h.n_recover_fail_total - n0 > 0) {
-      // location of failing cells in the final state is not tracked per cell; report extremes of the final primitives
-      const auto e2 = h.interior_copy(h.eps), r2 = h.interior_copy(h.rho);
-      double me = 0, mr = 0;
-      for (size_t i = 0; i < e2.size(); ++i) { me = std::fmax(me, e2[i]); mr = std::fmax(mr, r2[i]); }
-      j["evolve"]["final_max_eps_over_eps_s"] = me / eps_s;
-      j["evolve"]["final_max_rho_over_rho_s"] = mr / rho_s;
+    if (fail_final > 0) {
+      // where the cells of the final state that fail the primitive recovery are: computational-frame density R, energy E,
+      // |M|/E, radius from the box centre, and the share of the baryon number and of the energy they carry
+      const auto fl = h.fail_flags_copy();
+      const auto R = h.interior_copy(h.U[0]), E = h.interior_copy(h.U[4]), Mx = h.interior_copy(h.U[1]), My = h.interior_copy(h.U[2]),
+                 Mz = h.interior_copy(h.U[3]);
+      double Rmin = 1e300, Rmax = 0, Emin = 1e300, Emax = 0, qmin = 2, qmax = 0, rmin = 1e300, rmax = 0, sumR = 0, sumE = 0, sumq = 0;
+      long n = 0, n_ne_vac = 0;
+      size_t q = 0;
+      const Real v3 = grid.dx * grid.dx * grid.dx;
+      for (int i = 0; i < nx; ++i)
+        for (int jy = 0; jy < ny; ++jy)
+          for (int k = 0; k < nz; ++k, ++q) {
+            if (!fl[q]) continue;
+            const double m = std::sqrt(Mx[q] * Mx[q] + My[q] * My[q] + Mz[q] * Mz[q]);
+            const double ratio = E[q] > 0 ? m / E[q] : 0.0;
+            const double x = o[0] + i * grid.dx, y = o[1] + jy * grid.dx, z = o[2] + k * grid.dx, r = std::sqrt(x * x + y * y + z * z);
+            ++n;
+            Rmin = std::fmin(Rmin, R[q]); Rmax = std::fmax(Rmax, R[q]); Emin = std::fmin(Emin, E[q]); Emax = std::fmax(Emax, E[q]);
+            qmin = std::fmin(qmin, ratio); qmax = std::fmax(qmax, ratio); rmin = std::fmin(rmin, r); rmax = std::fmax(rmax, r);
+            sumR += R[q] * v3; sumE += E[q] * v3; sumq += ratio;
+          }
+      (void)n_ne_vac;
+      j["evolve"]["failing_cells_final"] = {{"count", n}, {"R_min_over_rho_s", Rmin / rho_s}, {"R_max_over_rho_s", Rmax / rho_s},
+                                            {"E_min_over_eps_s", Emin / eps_s}, {"E_max_over_eps_s", Emax / eps_s},
+                                            {"absM_over_E_min", qmin}, {"absM_over_E_max", qmax}, {"absM_over_E_mean", n ? sumq / n : 0.0},
+                                            {"radius_min_fm", rmin}, {"radius_max_fm", rmax},
+                                            {"baryon_number_in_failing_cells", sumR}, {"energy_in_failing_cells_GeV", sumE}};
     }
   }
   return j;
@@ -85,12 +106,14 @@ int main(int argc, char** argv) {
     try {
       std::string out = "ic_out", cfgfile;
       double evolve_fm = 0.0;
+      bool snapshot = true;
       std::vector<std::string> overrides;
       for (int a = 1; a < argc; ++a) {
         const std::string s = argv[a];
         if (s == "--out" && a + 1 < argc) out = argv[++a];
         else if (s == "--config" && a + 1 < argc) cfgfile = argv[++a];
         else if (s == "--evolve" && a + 1 < argc) evolve_fm = std::stod(argv[++a]);
+        else if (s == "--no-snapshot") snapshot = false;
         else if (s.rfind("--", 0) == 0) { /* Kokkos flags */ }
         else overrides.push_back(s);
       }
@@ -101,7 +124,7 @@ int main(int argc, char** argv) {
       const spf::Grid grid = spf::Grid::make_3d(cfg.get<int>("grid.nx"), cfg.get<int>("grid.ny"), cfg.get<int>("grid.nz"), cfg.get<double>("grid.dx_fm"));
       const spf::InitialState st = spf::build_initial_state(cfg, grid);
       nlohmann::json j;
-      spf::with_eos(cfg, SPF_SOURCE_DIR, [&](const auto& eos) { j = run(cfg, eos, grid, st, out, evolve_fm); });
+      spf::with_eos(cfg, SPF_SOURCE_DIR, [&](const auto& eos) { j = run(cfg, eos, grid, st, out, evolve_fm, snapshot); });
       j["generator"] = st.generator;
       j["e_lab_gev"] = st.kin.e_lab;
       j["gamma_cm"] = st.kin.gamma_cm;
