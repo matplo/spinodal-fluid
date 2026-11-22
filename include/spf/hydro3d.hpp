@@ -5,6 +5,7 @@
 // The solver is a template on the equation-of-state type and uses only  eos.p0(eps, rho).
 // Kernels are named functors (docs/device_rules.md, rule 2).
 #include "spf/config.hpp"
+#include "spf/gradient.hpp"
 #include "spf/shasta.hpp"
 
 #include <array>
@@ -23,6 +24,7 @@ enum class SweepOrder { Permuted, Fixed };
 
 struct Hydro3DParams {
   ShastaParams shasta;
+  GradientParams gradient;  // finite-range pressure (gradient.hpp); form = off unless set from a configuration
   SweepOrder order = SweepOrder::Permuted;
   int nx = 64, ny = 64, nz = 64;
   Real dx = 0.2;  // fm
@@ -31,6 +33,7 @@ struct Hydro3DParams {
   static Hydro3DParams from_config(const Config& cfg) {
     Hydro3DParams p;
     p.shasta = ShastaParams::from_config(cfg);
+    p.gradient = GradientParams::from_config(cfg);
     const std::string so = cfg.get<std::string>("shasta.sweep_order");
     if (so == "permuted") p.order = SweepOrder::Permuted;
     else if (so == "fixed") p.order = SweepOrder::Fixed;
@@ -137,12 +140,18 @@ struct Recover3K {
   Field3 p, vd, pvd;
   Kokkos::View<int***> fail;
   int dir, use_pex;
+  Field3 rho_rf;     // rest-frame density of the recovery (written when write_rho != 0)
+  int write_rho;
+  int force_only;    // 1: the recovery uses p0 alone; pex is added to the flux terms only (gradient.in_primitive_recovery)
   KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
     const Real mx = Mx(i, j, k), my = My(i, j, k), mz = Mz(i, j, k);
     const Real Ma = Kokkos::sqrt(mx * mx + my * my + mz * mz);
     const Real pe = use_pex ? pex(i, j, k) : 0.0;
+    const Real pe_rec = force_only ? 0.0 : pe;
     Real ee, rr, c, pp;
-    const int fl = recover_core(eos, R(i, j, k), Ma, E(i, j, k), e_vac, pe, ee, rr, c, pp);
+    const int fl = recover_core(eos, R(i, j, k), Ma, E(i, j, k), e_vac, pe_rec, ee, rr, c, pp);
+    if (force_only) pp += pe;
+    if (write_rho) rho_rf(i, j, k) = rr;
     const Real md = dir == 0 ? mx : (dir == 1 ? my : mz);
     const Real vv = Ma > 0.0 ? c * (md / Ma) : 0.0;
     p(i, j, k) = pp;
@@ -160,12 +169,15 @@ struct PrimOutK {
   Field3 eps, rho, vx, vy, vz, p;
   Kokkos::View<int***> fail;
   int use_pex;
+  int force_only;
   KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
     const Real mx = Mx(i, j, k), my = My(i, j, k), mz = Mz(i, j, k);
     const Real Ma = Kokkos::sqrt(mx * mx + my * my + mz * mz);
     const Real pe = use_pex ? pex(i, j, k) : 0.0;
+    const Real pe_rec = force_only ? 0.0 : pe;
     Real ee, rr, c, pp;
-    const int fl = recover_core(eos, R(i, j, k), Ma, E(i, j, k), e_vac, pe, ee, rr, c, pp);
+    const int fl = recover_core(eos, R(i, j, k), Ma, E(i, j, k), e_vac, pe_rec, ee, rr, c, pp);
+    if (force_only) pp += pe;
     eps(i, j, k) = ee; rho(i, j, k) = rr; p(i, j, k) = pp;
     vx(i, j, k) = Ma > 0.0 ? c * (mx / Ma) : 0.0;
     vy(i, j, k) = Ma > 0.0 ? c * (my / Ma) : 0.0;
@@ -239,17 +251,21 @@ class Hydro3D {
   EoS eos;
   Grid grid;
   ShastaParams prm;
+  GradientParams grad;
   SweepOrder order = SweepOrder::Permuted;
   Boundary bc[3];
   Field3 U[5], Uh[5], Un[5];  // conserved (R, Mx, My, Mz, E) at n, n+1/2, n+1
   Field3 p_extra;             // extra pressure supplied by the caller, all cells incl. ghosts; zero here
   bool use_p_extra = true;    // false: the hook is bypassed (T3.6)
+  Field3 rho_rf;              // rest-frame density of the most recent recovery inside a sweep (allocated if the gradient term is on)
+  bool rho_rf_valid = false;  // false: step() first fills rho_rf from a recovery of U
+  Real min_pgrad_ratio_seen = 0.0;  // most negative p_grad / p0 over the samples taken by sample_pgrad_ratio()
   Field3 eps, rho, vx, vy, vz, p_out;  // primitives of the last update_primitives() (allocated on first use)
   long n_clamped_total = 0, n_recover_fail_total = 0, steps = 0;
   Real time = 0.0;
 
   Hydro3D(const EoS& eos_, const Hydro3DParams& hp)
-      : eos(eos_), grid(Grid::make_3d(hp.nx, hp.ny, hp.nz, hp.dx)), prm(hp.shasta), order(hp.order), work_(grid) {
+      : eos(eos_), grid(Grid::make_3d(hp.nx, hp.ny, hp.nz, hp.dx)), prm(hp.shasta), grad(hp.gradient), order(hp.order), work_(grid) {
     for (int d = 0; d < 3; ++d) bc[d] = prm.bc;
     const char* names[5] = {"R", "Mx", "My", "Mz", "E"};
     for (int c = 0; c < 5; ++c) {
@@ -258,6 +274,7 @@ class Hydro3D {
       Un[c] = grid.make_field(std::string("Un_") + names[c]);
     }
     p_extra = grid.make_field("p_extra");
+    if (grad.form != GradientForm::Off) rho_rf = grid.make_field("rho_rf");
     p_ = grid.make_field("p");
     vd_ = grid.make_field("vd");
     pvd_ = grid.make_field("pvd");
@@ -306,8 +323,36 @@ class Hydro3D {
     // p_extra of the initial state is not included: the hook starts at zero
     Kokkos::parallel_for("hydro3d_cons_from_prim", interior_policy(grid),
                          detail::ConsFromPrim3K<EoS>{eos, Uh[0], Uh[1], Uh[2], Uh[3], Uh[4], U[0], U[1], U[2], U[3], U[4]});
+    if (gradient_on()) {
+      // Uh[1] still holds the staged rest-frame density: it is the "most recent recovery" for the first refresh
+      Kokkos::deep_copy(rho_rf, Uh[1]);
+      rho_rf_valid = true;
+    }
     time = 0.0;
     steps = 0;
+  }
+
+  // The finite-range pressure is applied (form != off and the hook is enabled).
+  bool gradient_on() const { return grad.form != GradientForm::Off && use_p_extra; }
+  bool force_only() const { return gradient_on() && grad.recovery == GradientRecovery::ForceOnly; }
+
+  // Fill rho_rf from a recovery of U (use after writing U directly, e.g. from an initial-condition generator).
+  // Uses the current p_extra (zero at start).
+  void init_rho_rf() {
+    update_primitives();
+    Kokkos::deep_copy(rho_rf, rho);
+    rho_rf_valid = true;
+  }
+
+  // Minimum over the interior of p_grad / p0 for the current p_extra and U (diagnostic; side-effect free for the solution).
+  // The running minimum is kept in min_pgrad_ratio_seen.
+  Real sample_pgrad_ratio() {
+    update_primitives();
+    Real m = 1e300;
+    Kokkos::parallel_reduce("hydro3d_min_pgrad_ratio", interior_policy(grid), detail::MinPgradRatioK{p_out, p_extra}, Kokkos::Min<Real>(m));
+    if (m > 0.0) m = 0.0;
+    if (m < min_pgrad_ratio_seen) min_pgrad_ratio_seen = m;
+    return m;
   }
 
   // ------------------------------------------------------------------ diagnostics
@@ -336,13 +381,14 @@ class Hydro3D {
     }
     Kokkos::parallel_for("hydro3d_primitives", interior_policy(grid),
                          detail::PrimOutK<EoS>{eos, prm.e_vac, U[0], U[1], U[2], U[3], U[4], p_extra, eps, rho, vx, vy, vz, p_out,
-                                               fail_, use_p_extra ? 1 : 0});
+                                               fail_, use_p_extra ? 1 : 0, force_only() ? 1 : 0});
     return count_fail();
   }
 
   // ------------------------------------------------------------------ evolution
   // One time step dt = lam * dx: three sweeps (one per direction), each a full half-step SHASTA step of the five fields.
   void step(Real lam) {
+    if (gradient_on() && !rho_rf_valid) init_rho_rf();
     int o[3] = {0, 1, 2};
     if (order == SweepOrder::Permuted) {
       const int s = static_cast<int>(steps % 3);
@@ -442,8 +488,30 @@ class Hydro3D {
     e[dir] = grid.size(dir);
     Kokkos::parallel_for("hydro3d_recover", make_policy(b, e),
                          detail::Recover3K<EoS>{eos, prm.e_vac, Q[0], Q[1], Q[2], Q[3], Q[4], p_extra, p_, vd_, pvd_, fail_, dir,
-                                                use_p_extra ? 1 : 0});
+                                                use_p_extra ? 1 : 0, rho_rf, gradient_on() ? 1 : 0, force_only() ? 1 : 0});
     count_fail();
+  }
+
+  // Ghost layers along dir of one field (transverse interior only).
+  void fill_dir_one(const Field3& F, int dir) const {
+    const int g = grid.g[dir], n = grid.n[dir];
+    for (int side = 0; side < 2; ++side) {
+      int b[3] = {grid.g[0], grid.g[1], grid.g[2]};
+      int e[3] = {grid.g[0] + grid.n[0], grid.g[1] + grid.n[1], grid.g[2] + grid.n[2]};
+      b[dir] = side == 0 ? 0 : g + n;
+      e[dir] = side == 0 ? g : g + n + g;
+      detail::GhostFillK k{F, dir, g, n, bc[dir] == Boundary::Periodic ? 1 : 0, side == 0 ? 1 : 0, b[dir]};
+      Kokkos::parallel_for("spf_fill_ghost_dir1", make_policy(b, e), k);
+    }
+  }
+
+  // p_extra <- p_grad(rho_rf): ghost-fill rho_rf in all three directions (sequentially, so that transverse ghosts and corners
+  // are filled), evaluate the Laplacian stencil on the interior, then fill the ghost layers of p_extra along dir (a sweep reads
+  // p_extra on its own line only, ghosts included).
+  void refresh_p_grad(int dir) {
+    for (int d = 0; d < 3; ++d) fill_ghost(grid, d, bc[d], rho_rf);
+    compute_p_grad(grid, grad, rho_rf, p_extra);
+    fill_dir_one(p_extra, dir);
   }
 
   void enforce(Field3* Q) {
@@ -456,11 +524,17 @@ class Hydro3D {
     const Field3* f[5] = {&zero_, &zero_, &zero_, &zero_, &pvd_};
     f[1 + dir] = &p_;
     fill_ghosts_dir(U, dir);
-    recover_dir(U, dir);
+    if (gradient_on()) refresh_p_grad(dir);  // from rho_rf of the previous recovery (half-step state of the previous sweep)
+    recover_dir(U, dir);                     // writes rho_rf from U
     for (int c = 0; c < 5; ++c) shasta_step(grid, dir, 0.5 * lam, prm, U[c], vd_, *f[c], Uh[c], work_);
     enforce(Uh);
     fill_ghosts_dir(Uh, dir);
-    recover_dir(Uh, dir);
+    if (gradient_on()) refresh_p_grad(dir);  // from rho_rf of the recovery of U just above
+    recover_dir(Uh, dir);                    // writes rho_rf from U^{1/2}
+    if (gradient_on() && grad.half_step == GradientHalfStep::Midpoint) {
+      refresh_p_grad(dir);                   // gradient.half_step_refresh = midpoint: p_grad from the density of U^{1/2}
+      recover_dir(Uh, dir);
+    }
     for (int c = 0; c < 5; ++c) shasta_step(grid, dir, lam, prm, U[c], vd_, *f[c], Un[c], work_);
     enforce(Un);
     for (int c = 0; c < 5; ++c) {

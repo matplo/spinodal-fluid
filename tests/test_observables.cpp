@@ -59,7 +59,7 @@ ObsParams default_params() { return ObsParams::from_config(default_config()); }
 
 Real gauss3(Real r2, Real B, Real sigma) { return B / std::pow(2.0 * kPi, 1.5) / (sigma * sigma * sigma) * std::exp(-0.5 * r2 / (sigma * sigma)); }
 
-// Closed form (docs/equations.md, Sect. 10): Gaussians of equal width, baryon numbers B_i, well separated:
+// Closed form (docs/equations.md, Sect. 11): Gaussians of equal width, baryon numbers B_i, well separated:
 //   <rho^N>/<rho>^N = 2^(3N/2) (N+1)^(-3/2) * [sum B_i^(N+1) / A] / [sum B_i^2 / A]^N,  A = sum B_i
 Real gauss_moment(const std::vector<Real>& B, int N) {
   Real A = 0, s2 = 0, sN = 0;

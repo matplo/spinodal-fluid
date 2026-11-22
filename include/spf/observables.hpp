@@ -1,7 +1,7 @@
 #pragma once
 // Observables of the collision simulations (WP6): density moments, transverse flow, phase-plane occupancy, baryon fraction in a
 // region mask, end of the fluid stage, clump finder; the ObservableRecorder and the snapshot post-processing share one code path.
-// Definitions: docs/equations.md, Sect. 10; output files: docs/observables.md.
+// Definitions: docs/equations.md, Sect. 11; output files: docs/observables.md.
 //
 // Reductions are named functor structs (docs/device_rules.md, rules 2 and 6). The phase-plane histogram uses atomic additions
 // (Kokkos::atomic_add on a device View), so its summation order is not reproducible between runs on the OpenMP and CUDA backends.

@@ -26,7 +26,7 @@ been measured so far.
 | WP1 | SHASTA in one dimension | implemented, see `docs/validation.md` |
 | WP2 | equations of state | analytic EoS done; table reader and scaled-EoS wrapper (WP2c) implemented, see `docs/validation.md`; physical tables pending (WP2b) |
 | WP3 | 3+1D solver, GPU validation | implemented, see `docs/validation.md` (WP3 and WP3g) |
-| WP4 | finite-range term, spinodal growth rates | not started |
+| WP4 | finite-range term, spinodal growth rates | implemented, see `docs/validation.md` (WP4); several comparisons with the continuum formulae at 8 to 10 cells per wavelength are reported as expected failures |
 | WP5, WP7 | initial conditions, collision runs | not started |
 | WP6 | observables (moments, clumps, U_perp, phase plane), `spf_observe`, ensemble script | implemented, see `docs/validation.md` and `docs/observables.md` |
 | WP8 | linear-response library | not started |

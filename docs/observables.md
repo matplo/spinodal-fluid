@@ -1,6 +1,6 @@
 # Observables: output files (WP6)
 
-`ObservableRecorder` (in a run) and `spf_observe` (on snapshots) write the same files into one output directory. Definitions: `docs/equations.md`, Sect. 10.
+`ObservableRecorder` (in a run) and `spf_observe` (on snapshots) write the same files into one output directory. Definitions: `docs/equations.md`, Sect. 11.
 
 | File | Content |
 |---|---|
