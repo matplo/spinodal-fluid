@@ -1,0 +1,31 @@
+# SMASH 3.4.2 configuration template: Pb+Pb, b = 0, cascade mode (no potentials), OSCAR2013 particle output at fixed times.
+# Dollar-sign placeholders are filled by tools/smash/run_smash.py. Documented in docs/initial_state.md.
+Logging:
+    default: INFO
+General:
+    Modus: Collider
+    Time_Step_Mode: Fixed
+    Delta_Time: 0.1
+    End_Time: ${end_time}
+    Randomseed: ${seed}
+    Nevents: ${nevents}
+Collision_Term:
+    Force_Decays_At_End: false
+Modi:
+    Collider:
+        Projectile:
+            Particles: {2212: 82, 2112: 126}   # 208Pb
+        Target:
+            Particles: {2212: 82, 2112: 126}
+        E_Kin: ${ekin}                         # kinetic energy per nucleon in the fixed-target frame [GeV]
+        Calculation_Frame: "center of velocity"
+        Fermi_Motion: "${fermi_motion}"
+        Impact:
+            Value: 0.0
+        Initial_Distance: ${initial_distance}
+Output:
+    Output_Times: ${output_times}
+    Particles:
+        Format: ["Oscar2013"]
+        Only_Final: "No"
+${collisions_block}

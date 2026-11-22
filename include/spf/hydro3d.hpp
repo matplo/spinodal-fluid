@@ -332,6 +332,21 @@ class Hydro3D {
     steps = 0;
   }
 
+  // Set the conserved fields directly (WP5 initial states). The five Views must have the extents of this grid (ghost layers
+  // included; the ghost layers are copied as they are, normally zero). Time and step counter are reset; with the gradient term on,
+  // rho_rf is filled lazily by the first step (init_rho_rf). No equation of state is used here.
+  void set_conserved(const Field3& R_, const Field3& Mx_, const Field3& My_, const Field3& Mz_, const Field3& E_) {
+    const Field3* src[5] = {&R_, &Mx_, &My_, &Mz_, &E_};
+    for (int c = 0; c < 5; ++c) {
+      if (src[c]->extent(0) != U[c].extent(0) || src[c]->extent(1) != U[c].extent(1) || src[c]->extent(2) != U[c].extent(2))
+        throw std::invalid_argument("Hydro3D::set_conserved: field extents differ from the grid");
+      Kokkos::deep_copy(U[c], *src[c]);
+    }
+    rho_rf_valid = false;
+    time = 0.0;
+    steps = 0;
+  }
+
   // The finite-range pressure is applied (form != off and the hook is enabled).
   bool gradient_on() const { return grad.form != GradientForm::Off && use_p_extra; }
   bool force_only() const { return gradient_on() && grad.recovery == GradientRecovery::ForceOnly; }
