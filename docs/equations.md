@@ -200,3 +200,31 @@ a cell where it fails is flagged.
 `Hydro3D::write_snapshot(base, fields, config)` writes `<base>.bin` (raw little-endian float64, the requested fields concatenated, each in C order
 `[ix][iy][iz]`, interior cells only) and `<base>.json` (shape, `dx_fm`, `time_fm`, `step`, field names with byte offsets, configuration echo).
 Fields: `R Mx My Mz E eps rho vx vy vz p`. Host mirror copies are made only there.
+
+
+## 10. Observables (`include/spf/observables.hpp`, WP6)
+
+Sources: Steinheimer and Randrup, PRL 109, 212301 (arXiv:1209.2462), Eq. 3 and Figs. 3-4; PRC 87, 054903 (arXiv:1302.2956), Sect. IV A-C, Eqs. 13-16, Figs. 5-8.
+Cell centres are at `x_i = (i + 1/2 - n/2) dx` measured from the centre of the box; `dV = dx^3`. `D` is the density selected by `obs.moment_density`:
+the computational-frame baryon density `R = gamma rho` (default; then `A` is exactly the conserved baryon number) or the rest-frame `rho`.
+
+* Moments: `A = Integral D d^3r`, `<D^N> = (1/A) Integral D^N D d^3r`, normalised moment `<D^N> / <D>^N` (N = 1 gives 1). Enhancement(t) = normalised moment(t) / normalised
+  moment(t_init); the maximum over time is taken by `tools/obs_ensemble.py` and in `observables_summary.json`.
+  **Prefactor note.** arXiv:1302.2956 Eq. 13 prints the prefactor ambiguously ("A = <rho^0>"). The reading `1/A` is the one for which the normalised moments
+  are dimensionless and N = 1 gives exactly 1, as the paper states; it is used here. A prefactor `1/V` would make the ratio carry a factor `(V/A)^(N-1)`, so it would no longer be a pure density ratio. The sums are evaluated on `D / mean(D)` (a pre-pass computes the mean) so that the rounding error of the N-th power stays near N machine epsilon.
+* Transverse flow, Eqs. 14-16 with the weight `D` (the same density as the moments), laboratory-frame velocities, and `x`, `y` measured from the beam axis (the z axis through the centre of the box):
+  `M = Integral D d^3r`, `M Q^2 = Integral (x^2 + y^2) D d^3r`, `U_perp = (1/(M Q)) Integral (v_x x + v_y y) D d^3r`. For `v = H (x, y)` this is `U_perp = H Q`, `Q^2 = <x^2 + y^2>`;
+  for a Gaussian of width sigma `U_perp = sqrt(2) H sigma`.
+* Phase plane: 2D histogram of baryon number (weights `R dV`) in `(rho/rho_s, eps/eps_s)`, rest-frame `rho`, `eps`; bins `[i d, (i+1) d)`, defaults 0..12 rho_s step 0.1 and 0..30 eps_s step 0.25;
+  baryon number outside the range is kept in `outside` (histogram + outside = baryon number). Baryon fraction in a region: `sum(R dV over cells where mask(eps, rho)) / sum(R dV)`; the mask implemented is
+  `vs2(eps, rho) < 0` of the equation of state in use (device function, rule 9). Hook: any struct with `KOKKOS_INLINE_FUNCTION bool operator()(Real eps, Real rho) const` is a mask (`compute_observables`,
+  `compute_phase_plane`); coexistence and isothermal-spinodal masks of a finite-temperature table (WP2b) are not implemented.
+* End of the fluid stage: first recorded time at which all cells have `eps < obs.fluid_end_eps_eps_s * eps_s` (arXiv:1302.2956, caption of Fig. 8). Resolution: `obs.every_steps * dt`.
+* Clumps: cells with `D > obs.clump_rho_min_rho_s * rho_s`, connected with 6 faces (`obs.clump_connectivity` = 6) or 26 neighbours (edges and corners too); union-find on the host. The box wraps
+  (a clump crossing a face is one clump) iff `grid.boundary = periodic`. Baryon number of a clump = `sum R dV`. Histogram bins: bin k holds the clumps with `round(B) = k`, k = 0..`obs.clump_hist_max` (25), plus an overflow count.
+
+### Closed form for Gaussians (test T6.2)
+For `rho_i = B_i (2 pi)^(-3/2) sigma^(-3) exp(-|r - c_i|^2 / (2 sigma^2))`, well separated, same sigma: `Integral rho_i^(N+1) d^3r = B_i^(N+1) (2 pi)^(-3N/2) sigma^(-3N) (N+1)^(-3/2)`, hence
+`<rho^N> = K_N sum_i B_i^(N+1) / A`, `K_N = (2 pi)^(-3N/2) sigma^(-3N) (N+1)^(-3/2)`, and
+`<rho^N>/<rho>^N = 2^(3N/2) (N+1)^(-3/2) [sum B_i^(N+1) / A] / [sum B_i^2 / A]^N`.
+For identical Gaussians the bracket is 1 and the result is `2^(3N/2) / (N+1)^(3/2)`, independent of M, B and sigma (the reviewer's value; confirmed).
