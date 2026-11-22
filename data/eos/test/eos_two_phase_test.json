@@ -1,0 +1,40 @@
+{
+  "format": "spf_eos_table",
+  "format_version": 1,
+  "description": "Finite-temperature two-phase equation of state (X branch + quintic Hermite join + plasma, smooth-maximum floors; docs/eos_finite_T.md), p0, T, mu, s on the (eps/eps_s, rho/rho_s) lattice. REDUCED TEST LATTICE for CI (step 0.2 in x, 0.08 in y).",
+  "byte_order": "little",
+  "dtype": "float64",
+  "lattice": {
+    "rho_s_fm3": 0.153,
+    "m_N_GeV": 0.94,
+    "x0": 0.0,
+    "dx": 0.2,
+    "nx": 201,
+    "y0": 0.0,
+    "dy": 0.08,
+    "ny": 201
+  },
+  "index_order": "p0, T, mu, s: C order, shape (nx, ny), element (ix, iy) at flat index ix*ny + iy (iy fastest); eps_min: shape (ny,) indexed by iy; all float64 little-endian, fields stored consecutively in the order of 'fields'",
+  "fields": [
+    "p0",
+    "T",
+    "mu",
+    "s",
+    "eps_min"
+  ],
+  "units": {
+    "p0": "GeV/fm^3",
+    "T": "GeV",
+    "mu": "GeV",
+    "s": "fm^-3",
+    "eps_min": "GeV/fm^3"
+  },
+  "bin_size_bytes": 1294440,
+  "sha256": "14493be6d8aaaa270152070781a61d182ad3bee5e0b51ba66d0a7af5b87542e0",
+  "generator": {
+    "tool": "tools/eos/finite_T/make_finite_T_table.py",
+    "construction": "smoothmax_floor",
+    "T_grid_points": 602,
+    "T_max_MeV": 250.0
+  }
+}

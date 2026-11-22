@@ -161,7 +161,7 @@ def invert_column(Tg, f, s, mu, rho, target):
     return T, fh, -dfh, muT, muT*rho - fh
 
 
-def build_arrays(z, dx, nx):
+def build_arrays(z, dx, nx, cont="linear"):   # cont: "linear" (used), "quadratic", "flat" (tested alternatives, see docs/eos_finite_T.md)
     """z: canonical npz contents; returns p0, T, mu, s (nx, ny) in GeV/fm units and eps_min (ny) plus diagnostics."""
     Tg, y, F, MU, S = z["T"], z["y"], z["f"], z["mu"], z["s"]; ny = len(y)
     x = dx*np.arange(nx); tgt = x*EPS_S
@@ -182,7 +182,14 @@ def build_arrays(z, dx, nx):
             i0 = np.where(ab)[0][0]; cold = dict(T=0.0, s=0.0, mu=mu[0], p=mu[0]*rho - f[0])
             for arr, key in ((TT, "T"), (SS, "s"), (MM, "mu"), (P0, "p")):
                 slope = (arr[i0, j] - cold[key])/(tgt[i0] - e0)
-                arr[be, j] = cold[key] + slope*(tgt[be] - e0)
+                if cont == "quadratic" and i0 + 1 < nx:     # parabola through the cold value and the first two nodes above the curve
+                    d0, d1 = tgt[i0] - e0, tgt[i0 + 1] - e0; v0, v1 = arr[i0, j] - cold[key], arr[i0 + 1, j] - cold[key]
+                    c2 = (v1/d1 - v0/d0)/(d1 - d0); c1 = v0/d0 - c2*d0; dd = tgt[be] - e0
+                    arr[be, j] = cold[key] + c1*dd + c2*dd*dd
+                elif cont == "flat":                        # cold value at every node below the curve
+                    arr[be, j] = cold[key]
+                else:
+                    arr[be, j] = cold[key] + slope*(tgt[be] - e0)
         elif len(be):
             for arr, key, v in ((TT, "T", 0.0), (SS, "s", 0.0), (MM, "mu", mu[0]), (P0, "p", mu[0]*rho - f[0])):
                 arr[be, j] = v
@@ -216,9 +223,40 @@ def stage_tables(work, outdir, dx, dy, tdx, tdy, only_test=False):
     return meta
 
 
+def write_reference(testdir=None):
+    """data/eos/test/finite_T_reference.json: 10 lattice points (5 per test table) and 3 v_s^2 sign points for tests/test_eos_finite_T.cpp."""
+    import check_tables as C
+    testdir = testdir or os.path.join(ROOT, "data", "eos", "test")
+    T2, MX = C.Tab(os.path.join(testdir, "eos_two_phase_test")), C.Tab(os.path.join(testdir, "eos_maxwell_test"))
+    rng = np.random.default_rng(12345); pts = []
+    for name, t in (("eos_two_phase_test", T2), ("eos_maxwell_test", MX)):
+        ix_ok = [(i, j) for i in range(2, t.nx - 2) for j in range(2, t.ny - 2) if i*t.dx*C.EPS_S > t.emin[j] + 0.5 and t.F["T"][i, j] > 0.001]
+        for k in rng.choice(len(ix_ok), 5, replace=False):
+            i, j = ix_ok[k]
+            pts.append(dict(table=name, ix=int(i), iy=int(j), eps_GeV_fm3=i*t.dx*C.EPS_S, rho_fm3=j*t.dy*C.RHO_S, p0=float(t.F["p0"][i, j]),
+                            T=float(t.F["T"][i, j]), mu=float(t.F["mu"][i, j]), s=float(t.F["s"][i, j])))
+    def vs(t, eps, rho): return float(t.vs2_h(np.array(eps), np.array(rho))[0])
+    # spinodal: most negative v_s^2 at a point halfway between lattice nodes in the two-phase table
+    V = np.array([[vs(T2, (i + .5)*T2.dx*C.EPS_S, (j + .5)*T2.dy*C.RHO_S) if (i + .5)*T2.dx*C.EPS_S > T2.emin[j + 1] + 0.1 else 0.0
+                   for j in range(T2.ny - 1)] for i in range(T2.nx - 1)])
+    i, j = np.unravel_index(V.argmin(), V.shape)
+    sp = dict(label="spinodal", table="eos_two_phase_test", eps_GeV_fm3=(i + .5)*T2.dx*C.EPS_S, rho_fm3=(j + .5)*T2.dy*C.RHO_S, sign=-1)
+    j2 = int(round(2.0/T2.dy)); i2 = int(round(5.0/T2.dx)); out = dict(label="outside", table="eos_two_phase_test", eps_GeV_fm3=(i2 + .5)*T2.dx*C.EPS_S, rho_fm3=(j2 + .5)*T2.dy*C.RHO_S, sign=+1)
+    # Maxwell: rho = 6 rho_s, node-centred eps where T is close to 70 MeV (inside the coexistence interval)
+    jm = int(round(6.0/MX.dy)); col = MX.F["T"][:, jm]*1000; im = int(np.argmin(np.abs(col - 70.0))); mxp = dict(label="Maxwell", table="eos_maxwell_test", eps_GeV_fm3=(im + .5)*MX.dx*C.EPS_S, rho_fm3=(jm + .5)*MX.dy*C.RHO_S, sign=+1)
+    sp_pts = []
+    for q in (sp, out, mxp):
+        q["vs2_python"] = vs(T2 if q["table"] == "eos_two_phase_test" else MX, q["eps_GeV_fm3"], q["rho_fm3"]); sp_pts.append(q)
+    assert sp_pts[0]["vs2_python"] < -0.01 and sp_pts[1]["vs2_python"] > 0.01 and sp_pts[2]["vs2_python"] > 0, sp_pts
+    with open(os.path.join(testdir, "finite_T_reference.json"), "w") as f:
+        json.dump(dict(description="Reference values written by tools/eos/finite_T/make_finite_T_table.py (write_reference); units GeV, fm; "
+                       "v_s^2 from the Python port of the bicubic reader (tools/eos/finite_T/check_tables.py)", lattice_points=pts, vs2_points=sp_pts), f, indent=1)
+    print("wrote finite_T_reference.json:", [round(q["vs2_python"], 5) for q in sp_pts])
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("stage", choices=["canonical", "maxwell", "tables", "all"])
+    ap.add_argument("stage", choices=["canonical", "maxwell", "tables", "reference", "all"])
     ap.add_argument("--work", default=os.path.join(ROOT, "data", "eos", "generated"))
     ap.add_argument("--nproc", type=int, default=16)
     ap.add_argument("--dx", type=float, default=0.05); ap.add_argument("--dy", type=float, default=0.02)
@@ -226,7 +264,8 @@ def main(argv=None):
     a = ap.parse_args(argv); os.makedirs(a.work, exist_ok=True)
     if a.stage in ("canonical", "all"): stage_canonical(a.work, a.dy, a.nproc)
     if a.stage in ("maxwell", "all"): stage_maxwell(a.work, a.nproc)
-    if a.stage in ("tables", "all"): stage_tables(a.work, a.work, a.dx, a.dy, a.test_dx, a.test_dy)
+    if a.stage in ("tables", "all"): stage_tables(a.work, a.work, a.dx, a.dy, a.test_dx, a.test_dy); write_reference()
+    if a.stage == "reference": write_reference()
     return 0
 
 

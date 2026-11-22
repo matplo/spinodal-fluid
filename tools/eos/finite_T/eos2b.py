@@ -10,7 +10,7 @@ This file is the reviewed construction module with the following additions (no c
     Newton iteration on ln n in ``mu0_of`` (legacy Newton diverges for T <~ 1 MeV), and breaks the pion panels at E = m_pi + j T.
   * ``hadron0``, ``plasma0``, ``TwoPhase.f0``: the exact T = 0 limit of the construction.
   * ``TwoPhase.f_low``: for 0 < T < T_LOW, f = f0(rho) - alpha(rho) T^2 / 2 (Sommerfeld form), alpha from f(T = T_LOW).
-  * ``TwoPhase.fs``: f, mu and s = -df/dT (analytic in the X and plasma regions, central difference with step H_S in the quintic region).
+  * ``TwoPhase.fs``: f, mu and s = -df/dT (analytic in the X and plasma regions, 5-point central difference with step H_S in the quintic region).
 """
 import numpy as np
 from numpy.polynomial import polynomial as P
@@ -276,7 +276,7 @@ class TwoPhase(Model):
 
 # ---- WP2b additions: exact T = 0 limit, Sommerfeld form at very low T, entropy density ----
 T_LOW = 0.5      # MeV: below this temperature f = f0(rho) - alpha(rho) T^2 / 2
-H_S = 0.05       # MeV: central-difference step for s = -df/dT in the quintic region
+H_S = 0.05       # MeV: step of the 5-point central difference for s = -df/dT in the quintic region (the 2-point form has 2e-5 relative error near T_c)
 
 def hadron0(rho):
     """T = 0 hadron phase (degenerate nucleons, no pions): dict f, mu, p, s, d2f (= dmu/drho)."""
@@ -311,7 +311,7 @@ Model.f0 = _f0
 
 def _fs(self, T, rho):
     """f, mu, s = -df/dT at (T, rho[]).  T = 0: exact limit (s = 0).  0 < T < T_LOW: f = f0 - alpha T^2/2, mu likewise (T^2 scaling),
-    s = alpha T.  T >= T_LOW: analytic s in the X (rho <= a) and plasma (rho >= b) regions, central difference (step H_S) in a < rho < b."""
+    s = alpha T.  T >= T_LOW: analytic s in the X (rho <= a) and plasma (rho >= b) regions, 5-point central difference (step H_S) in a < rho < b."""
     rho = np.atleast_1d(np.asarray(rho, float))
     f0, mu0 = self.f0(rho)
     if T <= 0.0: return dict(f=f0, mu=mu0, s=np.zeros_like(rho))
@@ -328,7 +328,7 @@ def _fs(self, T, rho):
         Q = plasma(T, rho[hi]); out['f'][hi], out['mu'][hi], out['s'][hi] = Q['f'], Q['mu'], Q['s']
     if mid.any():
         out['f'][mid] = P.polyval(rho[mid]-a, c); out['mu'][mid] = P.polyval(rho[mid]-a, P.polyder(c))
-        fp = self.f(T + H_S, rho[mid])[0]; fm = self.f(T - H_S, rho[mid])[0]
-        out['s'][mid] = -(fp - fm)/(2*H_S)
+        fv = {k: self.f(T + k*H_S, rho[mid])[0] for k in (-2, -1, 1, 2)}      # 5-point central difference, step H_S
+        out['s'][mid] = -(8*(fv[1] - fv[-1]) - (fv[2] - fv[-2]))/(12*H_S)
     return out
 Model.fs = _fs
