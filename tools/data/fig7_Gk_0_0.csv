@@ -1,0 +1,32 @@
+# Fig. 7 (amplification factor G_k, 3-fluid 5 A GeV trajectory unless noted)
+# curve: (eta0,kappa0) = (0,0)
+# source: arXiv:1007.1448 PDF, page 10, vector path with 25 vertices, stroke colour (0.0, 0.0, 0.0), dash '[] 0'
+# mapping: x = -1.78995 + 0.020326319 * X_pt ; y = 19.2846 + -0.072594077 * Y_pt (PDF user-space points, y downwards)
+# calibration: 5 x ticks, 6 y ticks; residuals rms/max x = 4.98e-06/8.13e-06, y = 1.74e-05/2.28e-05 (data units)
+# columns in data units
+k_fm-1,G_k
+2.14357e-06,0.999994
+0.0999994,1.2029
+0.200003,1.44427
+0.3,1.73145
+0.400006,2.0643
+0.499991,2.44999
+0.599996,2.88715
+0.700002,3.37288
+0.800007,3.90288
+0.899992,4.46005
+0.999998,5.02287
+1.1,5.58286
+1.20001,6.07998
+1.29999,6.4929
+1.4,6.75997
+1.5,6.85855
+1.60001,6.7114
+1.7,6.32143
+1.8,5.62859
+1.90001,4.52857
+1.99999,3.55001
+2.1,2.62857
+2.2,1.78002
+2.29999,1.16718
+2.39999,0.999994

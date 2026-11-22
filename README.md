@@ -29,7 +29,7 @@ been measured so far.
 | WP4 | finite-range term, spinodal growth rates | implemented, see `docs/validation.md` (WP4); several comparisons with the continuum formulae at 8 to 10 cells per wavelength are reported as expected failures |
 | WP5, WP7 | initial conditions, collision runs | not started |
 | WP6 | observables (moments, clumps, U_perp, phase plane), `spf_observe`, ensemble script | implemented, see `docs/validation.md` and `docs/observables.md` |
-| WP8 | linear-response library | not started |
+| WP8 | linear-response library (dispersion relation, transport coefficients, G_k, Lalime), `spf_linear`, digitised Figs. 2-7 of arXiv:1007.1448 | implemented, see `docs/validation.md` (WP8); nuclear-EoS provider pending (WP2b) |
 
 ## Build
 
@@ -55,6 +55,7 @@ Programs accept `--override file.json` and `section.key=value` arguments and wri
 include/spf, src   library (Kokkos kernels; rules in docs/device_rules.md)
 apps               executables
 tests              doctest unit and regression tests
+tools/digitise_1007_1448.py, tools/data   digitiser for the figures of arXiv:1007.1448 (vector paths of the PDF) and its CSV output
 tools/eos          Python reference for the two-phase equation of state, its reference numbers, and the EoS table writer
 config             default configuration
 docs               plan, decisions, validation log

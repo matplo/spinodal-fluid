@@ -300,3 +300,56 @@ For `rho_i = B_i (2 pi)^(-3/2) sigma^(-3) exp(-|r - c_i|^2 / (2 sigma^2))`, well
 `<rho^N> = K_N sum_i B_i^(N+1) / A`, `K_N = (2 pi)^(-3N/2) sigma^(-3N) (N+1)^(-3/2)`, and
 `<rho^N>/<rho>^N = 2^(3N/2) (N+1)^(-3/2) [sum B_i^(N+1) / A] / [sum B_i^2 / A]^N`.
 For identical Gaussians the bracket is 1 and the result is `2^(3N/2) / (N+1)^(3/2)`, independent of M, B and sigma (the reviewer's value; confirmed).
+
+## 12. Linear response (`include/spf/linear/`, `src/linear/`, `apps/spf_linear.cpp`, WP8)
+
+Source: Randrup, PRC 82, 034902 (arXiv:1007.1448), Sects. III-V, Eqs. 33-38, 42-49. Host-side code (no Kokkos kernels). Units GeV, fm, c = 1.
+Time dependence `exp(-i w t)`: `Im w > 0` is growth, `gamma_k = max Im w` over the roots.
+
+### Dispersion relation and its cubic
+
+Harmonic disturbance of a uniform background `(rho0, T0)` with the finite-range pressure `p = p0 - C rho0 Lap rho` (Eq. 30), `C = a^2 eps_s / rho_s^2 = a^2 m_N / rho_s`
+(the same strength as `GradientParams::coef()`), effective viscosity `xi = 4/3 eta + zeta` with `zeta` neglected, heat current `q = -kappa (d_x T + T0 d_t v)`:
+
+    w^2 = vT2 k^2 + B k^4 - i nu w + (vs2 - vT2) k^2 / (1 + i q / w)                     (Eq. 33)
+    B = C rho0^2 / h0 [fm^2],   nu = lam_visc k^2 = (xi/h0) k^2,   q = lam_heat k^2 = (kappa/c_v) k^2.
+
+Using `1/(1 + i q/w) = w/(w + i q)` and multiplying by `(w + i q)`:
+
+    (w + i q)(w^2 + i nu w - A) - (vs2 - vT2) k^2 w = 0,    A = vT2 k^2 + B k^4,
+    w^3 + i (nu + q) w^2 - (S + q nu) w - i q A = 0,        S = vs2 k^2 + B k^4,       (since A + (vs2 - vT2) k^2 = S)
+
+a cubic with the three eigenmodes of the paper (one purely imaginary heat mode and a pair). For `q = 0` the cubic contains the spurious root `w = 0`
+(the multiplication by `w + i q`); the code then solves the quadratic `w^2 + i nu w - S = 0` directly, with the growing root written as `-2 S/(nu + s)`,
+`s = sqrt(nu^2 - 4 S)` (no cancellation), so that the ideal limit `gamma^2 = -S` holds to rounding. For `q > 0` the cubic is solved in closed form (Cardano in complex arithmetic,
+the larger of the two cube-root radicands), each root polished with Newton steps on the original polynomial. Checks: residual, Vieta relations and the uncleared Eq. 33 (T8.0).
+Limits used in the tests: `nu = q = 0`: `w^2 = S`; small `nu`: `w = w_ideal - i nu/2`; `k -> 0` with `q > 0`: the heat mode `w -> -i q vT2/vs2 = -i lam_heat k^2 vT2/vs2`,
+so `gamma > 0` iff `vT2 < 0` (the instability boundary moves from `vs2 = 0` to `vT2 = 0`).
+
+### Transport coefficients (Eqs. 34-38)
+
+`c0 = (1/4 pi) [(g_g + 3/2 g_q) zeta(3)/pi^2]^(1/3)` with `g_g = 16`, `g_q = 12`: 0.127788 (paper 0.12779). `eta = eta0 c0 d h`, `kappa = kappa0 c0 d c_v`, `d = n^(-1/3)`;
+`lam_visc = (4/3) eta0 c0 d`, `lam_heat = kappa0 c0 d` (both in fm; `c_v` drops out of `lam_heat`). `n` is the particle density: pions + nucleons + antinucleons in the hadron gas,
+gluons + quarks + antiquarks in the plasma. Across the spline region `linear.particle_density_in_spline_region` (decision S12) selects `linear_in_rho` (weight `(rho - rho_lo)/(rho_hi - rho_lo)`
+between the hadron-side and plasma-side densities at the same `T`), `hadron_side` or `plasma_side` (`particle_density_spline`).
+
+### Input interface
+
+`ThermoPoint {rho, T, h, vT2, vs2, cv, n}`: any equation of state can fill it (`vT2 = (rho/h)(dp/drho)_T`, `vs2 = vT2 + (T/(h c_v)) ((dp/dT)_rho)^2`, Eqs. 5-6;
+a provider from the finite-temperature table is not available yet and belongs to the package that builds the table). The analytic provider used by the tests is `ToyVdw`:
+a van der Waals fluid with constant specific heat per particle, `p = rho T/(1 - b rho) - a rho^2`, `eps = m rho + cv0 rho T - a rho^2`, `n = rho`, `c_v = cv0 rho`,
+`(dp/dT)_rho = rho/(1 - b rho)`, critical point `rho_c = 1/(3b)`, `T_c = 8a/(27 b)`. It has `vT2 < 0` inside the isothermal spinodal and `vs2 < 0` in a narrower core below `T_c`; it is not the nuclear EoS.
+
+### Amplification along a trajectory (Eqs. 45-49)
+
+`Gamma_k(t) = Integral gamma_k dt` (trapezoid rule on the trajectory grid, Eq. 47); `G_k = exp(Integral over gamma_k > 0 of gamma_k dt)` (Eq. 49), exact for piecewise-linear `gamma_k(t)`
+(a zero crossing inside a step is handled analytically). The Lalime equation `d sigma_k^2/dt = 2 gamma_k sigma_k^2 + 2 D_k` (Eq. 45 with `k = k'`, Eq. 46) is integrated step by step with `gamma_k` and `D_k`
+replaced by their step averages and the linear equation solved exactly, so constant `gamma_k, D_k` reproduce Eq. 48 to rounding.
+**Choice for `D_k` (default `einstein_hold_diffusion`):** for `gamma_k < 0` the paper's Einstein relation (text below Eq. 48: `sigma_k^2 -> -D_k/gamma_k = sigma_eq^2`) gives `D_k = -gamma_k sigma_eq^2`
+(`sigma_eq^2` = `linear.sigma_eq2`, a constant per mode; the paper does not give its value, it would follow from the thermal density fluctuation at the local `T`);
+for `gamma_k >= 0` the paper only says that the coupling "continually produces additional fluctuations that are also amplified" (Sect. V B), so `D_k` is held at the value of the last stable time
+(zero if the trajectory starts unstable). A user-supplied `D_k(i, t, gamma)` replaces this.
+
+### Fig. 2 numbers
+Ideal case (`nu = q = 0`, `vT2 = vs2 < 0`): `gamma^2 = |vs2| k^2 - B k^4` is maximal at `k0^2 = |vs2|/(2B)` with `gamma_max = |vs2|/(2 sqrt(B))`, and vanishes at `k_cut = 2 sqrt(2) k0`.
+From `t0 = 1.38 fm/c`, `k0 = 2.0 fm^-1`: `B = (1/t0)^2/k0^4 = 0.03282 fm^2`, `|vs2| = 2 B k0^2 = 0.2626`, `|vs| = 0.5124`.

@@ -1,0 +1,21 @@
+# Fig. 5 (phase trajectories at 5 A GeV and phase boundaries)
+# curve: UrQMD 5 A GeV trajectory (orange line)
+# source: arXiv:1007.1448 PDF, page 8, vector path with 14 vertices, stroke colour (1.0, 0.65, 0.0), dash '[] 0'
+# mapping: x = -5.08974 + 0.056125541 * X_pt ; y = 538.94 + -1.093367 * Y_pt (PDF user-space points, y downwards)
+# calibration: 6 x ticks, 4 y ticks; residuals rms/max x = 0.000282/0.000438, y = 0.00478/0.00667 (data units)
+# columns in data units
+rho_over_rho_s,T_MeV
+2.75666,100.006
+3.04812,99.9208
+3.50903,99.7492
+5.16664,98.9565
+6.5361,98.1419
+7.57223,97.3285
+8.49623,96.5347
+9.09677,95.7212
+9.14959,94.9493
+7.87694,94.5426
+5.7848,94.114
+4.23057,93.7073
+3.32533,93.2994
+2.42889,92.8708

@@ -5,6 +5,8 @@
 //                                (thermodynamics from an external equation of state); default: the analytic toy van der Waals EoS.
 // Parameters: gradient.a_fm, linear.eta0, linear.kappa0, k grid linear.k_min_fm / k_max_fm / nk, linear.sigma_eq2.
 // Output in output.dir: gamma_k_t.csv (t, k, gamma_k, Gamma_k), G_k.csv (k, G_k, ln_G_k, t_unstable, Gamma_end, sigma2_end), config_used.json.
+#include <Kokkos_Core.hpp>
+
 #include "spf/config.hpp"
 #include "spf/linear/amplification.hpp"
 
@@ -36,6 +38,9 @@ std::vector<std::vector<double>> read_rows(const std::string& path, std::size_t 
 }  // namespace
 
 int main(int argc, char** argv) {
+  Kokkos::initialize(argc, argv);  // needed only by Config::echo (runtime information)
+  int rc = 0;
+  {
   try {
     spf::Config cfg = spf::Config::from_file(SPF_DEFAULT_CONFIG);
     for (int a = 1; a < argc; ++a) {
@@ -48,7 +53,7 @@ int main(int argc, char** argv) {
     std::filesystem::create_directories(out);
     cfg.echo(out);
     const std::string trajfile = cfg.get<std::string>("linear.trajectory_csv");
-    if (trajfile.empty()) { std::fprintf(stderr, "spf_linear: set linear.trajectory_csv=<file with t, rho/rho_s, T_MeV>\n"); return 2; }
+    if (trajfile.empty()) throw std::runtime_error("set linear.trajectory_csv=<file with t, rho/rho_s, T_MeV>");
     const double rho_s = cfg.get<double>("constants.rho_s_fm3"), m_N = cfg.get<double>("constants.m_N_GeV");
     std::vector<L::TrajectoryPoint> traj;
     for (const auto& r : read_rows(trajfile, 3)) traj.push_back({r[0], r[1] * rho_s, r[2] * 1e-3});
@@ -104,7 +109,9 @@ int main(int argc, char** argv) {
     std::printf("spf_linear: %zu trajectory points, %d modes -> %s\n", traj.size(), nk, out.c_str());
   } catch (const std::exception& e) {
     std::fprintf(stderr, "spf_linear: %s\n", e.what());
-    return 1;
+    rc = 1;
   }
-  return 0;
+  }
+  Kokkos::finalize();
+  return rc;
 }

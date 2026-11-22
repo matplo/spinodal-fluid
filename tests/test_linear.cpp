@@ -270,21 +270,145 @@ TEST_CASE("T8.5 ideal-fluid numbers of the paper's Fig. 2 point") {
   const double a_cold = std::sqrt(B * (m_N * rho0) * rho_s / (m_N * rho0 * rho0));
   std::printf("T8.5 B = a^2 m_N rho0^2/(rho_s h0): with h0 = m_N rho0 the implied a = %.4f fm (gradient.a_fm default 0.033 fm gives B = %.5f fm^2)\n",
               a_cold, gradient_C(0.033, m_N, rho_s) * rho0 * rho0 / (m_N * rho0));
+
+}
+
+// T8.5b: expected failure, kept on purpose (rule: a failing acceptance test is reported, not loosened). The tolerance 0.01 was fixed before
+// the comparison. Measured: max distance 0.0105 (k = 2.830, where the digitised curve ends 0.011 fm^-1 beyond the library cut-off 2.8284).
+// The cut-off follows from the rounded paper numbers (t0 = 1.38 fm/c, k0 = 2.0 fm^-1): k_cut = sqrt(|vs2|/B) = 2 sqrt(2) k0, so 0.4 % in k0
+// moves it by 0.011. A first attempt with the vertical deviation at fixed k gave 0.115 (ill-conditioned where the curve is vertical).
+TEST_CASE("T8.5b digitised ideal curve of Fig. 2 vs library with the rounded paper numbers" * doctest::should_fail()) {
 #ifdef SPF_SOURCE_DIR
   {
+    const double t0 = 1.38, k0 = 2.0;
+    const double B = std::pow(1.0 / t0, 2) / std::pow(k0, 4), vs2 = 2.0 * B * k0 * k0;
+    DispersionParams d; d.vs2 = -vs2; d.vT2 = -vs2; d.B = B;
+    // digitised ideal curve of Fig. 2 (tools/digitise_1007_1448.py): compare with the library at the derived (B, vs2); tolerance 0.01 for the distance in the (k [fm^-1], gamma [c/fm]) plane
+    // (about 1.4 % of the peak; the digitisation resolution is 0.007 c/fm per PDF point, the paper quotes t0 to three digits)
     std::ifstream in(std::string(SPF_SOURCE_DIR) + "/tools/data/fig2_gamma_k_eta0_0_kappa0_0.csv");
-    if (in) {
-      std::string line; double worst = 0, gdig_max = 0, kdig = 0; int n = 0;
-      while (std::getline(in, line)) {
-        if (line.empty() || line[0] == '#' || !std::isdigit(static_cast<unsigned char>(line[0])) ) continue;
-        std::istringstream ss(line); char c; double k, gg;
-        ss >> k >> c >> gg;
-        if (gg > gdig_max) { gdig_max = gg; kdig = k; }
-        ++n;
-      }
-      std::printf("T8.5 digitised Fig. 2 (0,0) curve: %d points, gamma_max = %.4f at k = %.3f\n", n, gdig_max, kdig);
-      CHECK(n > 20);
+    REQUIRE(bool(in));
+    std::vector<std::pair<double, double>> lib;  // library curve sampled finely; compared by distance in the (k, gamma) plane
+    for (double k = 0.0; k < 3.2; k += 2e-4) lib.emplace_back(k, std::max(growth_rate(d, k), 0.0));
+    std::string line; double worst = 0, worst_g = 0, gdig_max = 0, kdig = 0, kend = 0; int n = 0;
+    while (std::getline(in, line)) {
+      if (line.empty() || line[0] == '#' || !std::isdigit(static_cast<unsigned char>(line[0]))) continue;
+      std::istringstream ss(line); char c; double k, gg;
+      ss >> k >> c >> gg;
+      ++n;
+      if (gg > gdig_max) { gdig_max = gg; kdig = k; }
+      if (gg > 1e-3) kend = k;
+      worst_g = std::max(worst_g, std::abs(gg - std::max(growth_rate(d, k), 0.0)));  // vertical deviation: ill-conditioned at the cut-off
+      double dmin = 1e9;
+      for (const auto& q : lib) dmin = std::min(dmin, std::hypot(q.first - k, q.second - gg));
+      worst = std::max(worst, dmin);
     }
+    std::printf("T8.5 digitised Fig. 2 (0,0) curve: %d points, gamma_max = %.4f at k = %.3f, last gamma > 0.001 at k = %.3f (library k_cut = %.4f); max distance of a digitised point from the library curve = %.4f (vertical deviation at fixed k, ill-conditioned at the cut-off: %.4f)\n",
+                n, gdig_max, kdig, kend, std::sqrt(vs2 / B), worst, worst_g);
+    CHECK(n > 100);
+    CHECK(worst < 0.01);
   }
+#endif
+}
+
+// T8.5c: the digitised (eta0, kappa0) = (1, 0) curve of Fig. 2 against the viscous quadratic. With the ideal numbers (B, vs2) from T8.5 the model
+// gamma (gamma + lam k^2) = |vs2| k^2 - B k^4 gives a constant lam = (|S|/gamma - gamma)/k^2 at every point if the library's functional form holds.
+// Check: relative scatter of lam over the digitised points with 0.4 < k < 2.5 and gamma > 0.05 below 10 % (fixed before the run); the implied
+// interparticle spacing d = 3 lam / (4 c0 eta0) is reported (no check: it needs the finite-temperature table).
+TEST_CASE("T8.5c viscous Fig. 2 curve gives a constant lam_visc") {
+#ifdef SPF_SOURCE_DIR
+  const double t0 = 1.38, k0 = 2.0, B = std::pow(1.0 / t0, 2) / std::pow(k0, 4), vs2 = 2.0 * B * k0 * k0;
+  std::ifstream in(std::string(SPF_SOURCE_DIR) + "/tools/data/fig2_gamma_k_eta0_1_kappa0_0.csv");
+  REQUIRE(bool(in));
+  std::string line; std::vector<double> lam, kk;
+  while (std::getline(in, line)) {
+    if (line.empty() || line[0] == '#' || !std::isdigit(static_cast<unsigned char>(line[0]))) continue;
+    std::istringstream ss(line); char c; double k, g;
+    ss >> k >> c >> g;
+    if (k < 0.4 || k > 2.5 || g < 0.05) continue;
+    lam.push_back((vs2 * k * k - B * std::pow(k, 4)) / g - g);
+    lam.back() /= k * k; kk.push_back(k);
+  }
+  REQUIRE(lam.size() > 20);
+  double m = 0, s2 = 0;
+  for (double v : lam) m += v;
+  m /= lam.size();
+  for (double v : lam) s2 += (v - m) * (v - m);
+  const double sd = std::sqrt(s2 / lam.size());
+  // round trip through the library: gamma(lam_visc = m) at the digitised k values reproduces the curve
+  DispersionParams d; d.vs2 = -vs2; d.vT2 = -vs2; d.B = B; d.lam_visc = m;
+  const GammaMax gm = max_growth(d, 0.1, 4.0, 3901);
+  const double c0 = c0_constant();
+  std::printf("T8.5c %zu points: lam_visc = %.4f fm, relative scatter %.3f; library with this lam: gamma_max = %.4f at k = %.3f (digitised 0.5067 at ~1.7); implied d = %.3f fm (n = %.3f fm^-3) for eta0 = 1\n",
+              lam.size(), m, sd / m, gm.gamma, gm.k, 0.75 * m / c0, std::pow(0.75 * m / c0, -3));
+  CHECK(sd / m < 0.10);
+#endif
+}
+
+// T8.5d: prediction of the three dissipative Fig. 2 curves from quantities read off the ideal and the viscous curves; the thermodynamic inputs
+// v_T^2 and c_v of the finite-temperature table are NOT needed: lam_heat = kappa0 c0 d does not contain c_v, and v_T^2 follows from the
+// heat-conduction cut-off (gamma = 0 means w = 0, i.e. A = v_T^2 k^2 + B k^4 = 0, so v_T^2 = -B k_cut^2, k_cut of the digitised (0,1) curve).
+// Inputs: B, vs2 (ideal numbers of T8.5), lam_visc (T8.5c, from the (1,0) curve), d = 3 lam_visc/(4 c0 eta0), then
+// lam_heat = kappa0 c0 d (= 0.75 lam_visc for eta0 = kappa0 = 1; this ratio is the prediction), v_T^2 from the (0,1) cut-off.
+// Compared curves: (1,0) [round trip of T8.5c], (0,1) and (1,1) [predictions]; tolerance 0.02 for the maximum distance of a digitised point
+// from the library curve in the (k, gamma) plane (fixed before the run).
+namespace {
+std::vector<std::pair<double, double>> read_curve(const std::string& name) {
+  std::vector<std::pair<double, double>> v;
+  std::ifstream in(std::string(SPF_SOURCE_DIR) + "/tools/data/" + name);
+  std::string line;
+  while (std::getline(in, line)) {
+    if (line.empty() || line[0] == '#' || !std::isdigit(static_cast<unsigned char>(line[0]))) continue;
+    std::istringstream ss(line); char c; double k, g;
+    ss >> k >> c >> g;
+    v.emplace_back(k, g);
+  }
+  return v;
+}
+double curve_distance(const DispersionParams& d, const std::vector<std::pair<double, double>>& dig, double kmax) {
+  std::vector<std::pair<double, double>> lib;
+  for (double k = 0.0; k < kmax; k += 4e-4) lib.emplace_back(k, std::max(growth_rate(d, k), 0.0));
+  double worst = 0;
+  for (const auto& p : dig) {
+    double dmin = 1e9;
+    for (const auto& q : lib) dmin = std::min(dmin, std::hypot(q.first - p.first, q.second - p.second));
+    worst = std::max(worst, dmin);
+  }
+  return worst;
+}
+}  // namespace
+
+TEST_CASE("T8.5d Fig. 2 heat-conduction curves predicted from the ideal and viscous curves") {
+#ifdef SPF_SOURCE_DIR
+  const double t0 = 1.38, k0 = 2.0, B = std::pow(1.0 / t0, 2) / std::pow(k0, 4), vs2 = 2.0 * B * k0 * k0;
+  const auto c10 = read_curve("fig2_gamma_k_eta0_1_kappa0_0.csv"), c01 = read_curve("fig2_gamma_k_eta0_0_kappa0_1.csv"), c11 = read_curve("fig2_gamma_k_eta0_1_kappa0_1.csv");
+  REQUIRE(c10.size() > 100);
+  // lam_visc as in T8.5c
+  double m = 0; int n = 0;
+  for (const auto& p : c10) {
+    if (p.first < 0.4 || p.first > 2.5 || p.second < 0.05) continue;
+    m += ((vs2 * p.first * p.first - B * std::pow(p.first, 4)) / p.second - p.second) / (p.first * p.first); ++n;
+  }
+  const double lam_visc = m / n, c0 = c0_constant();
+  const double d_fm = 0.75 * lam_visc / c0, lam_heat = 1.0 * c0 * d_fm;
+  // cut-off of the (0,1) curve: last digitised point with gamma > 0.001 plus the interpolated end on the axis
+  double kcut = 0;
+  for (const auto& p : c01) if (p.second > 1e-3) kcut = std::max(kcut, p.first);
+  // refine with the axis end point (gamma ~ 0)
+  for (const auto& p : c01) if (p.second <= 1e-3 && p.first > 3.0) kcut = std::max(kcut, p.first);
+  const double vT2 = -B * kcut * kcut;
+  DispersionParams d10; d10.vs2 = -vs2; d10.vT2 = -vs2; d10.B = B; d10.lam_visc = lam_visc;
+  DispersionParams d01; d01.vs2 = -vs2; d01.vT2 = vT2; d01.B = B; d01.lam_heat = lam_heat;
+  DispersionParams d11 = d01; d11.lam_visc = lam_visc;
+  const double e10 = curve_distance(d10, c10, 3.2), e01 = curve_distance(d01, c01, 3.8), e11 = curve_distance(d11, c11, 3.8);
+  const GammaMax g01 = max_growth(d01, 0.1, 3.4, 3301), g11 = max_growth(d11, 0.1, 3.4, 3301);
+  double pk01 = 0, pk11 = 0;
+  for (const auto& p : c01) pk01 = std::max(pk01, p.second);
+  for (const auto& p : c11) pk11 = std::max(pk11, p.second);
+  std::printf("T8.5d inputs: lam_visc = %.4f fm, d = %.4f fm, lam_heat = %.4f fm, vT2 = -B kcut^2 = %.4f (kcut = %.3f); "
+              "max distance: (1,0) %.4f, (0,1) %.4f, (1,1) %.4f; peaks (library vs digitised): (0,1) %.4f at k = %.3f vs %.4f, (1,1) %.4f at k = %.3f vs %.4f\n",
+              lam_visc, d_fm, lam_heat, vT2, kcut, e10, e01, e11, g01.gamma, g01.k, pk01, g11.gamma, g11.k, pk11);
+  CHECK(e10 < 0.02);
+  CHECK(e01 < 0.02);
+  CHECK(e11 < 0.02);
 #endif
 }

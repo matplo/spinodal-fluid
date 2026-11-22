@@ -1,0 +1,19 @@
+# Fig. 5 (phase trajectories at 5 A GeV and phase boundaries)
+# curve: 3-fluid 5 A GeV trajectory (magenta line)
+# source: arXiv:1007.1448 PDF, page 8, vector path with 12 vertices, stroke colour (1.0, 0.0, 1.0), dash '[] 0'
+# mapping: x = -5.08974 + 0.056125541 * X_pt ; y = 538.94 + -1.093367 * Y_pt (PDF user-space points, y downwards)
+# calibration: 6 x ticks, 4 y ticks; residuals rms/max x = 0.000282/0.000438, y = 0.00478/0.00667 (data units)
+# columns in data units
+rho_over_rho_s,T_MeV
+2.50477,100.006
+2.90955,99.5994
+4.3142,98.1212
+5.63966,96.6637
+6.55591,95.2074
+6.42722,94.5426
+6.3304,93.9849
+6.18189,93.4284
+5.40646,92.8927
+4.19432,92.3569
+2.97224,91.8212
+1.99436,91.2636

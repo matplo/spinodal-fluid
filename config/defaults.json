@@ -99,8 +99,8 @@
     "sigma_eq2": 1.0,
     "trajectory_csv": "",
     "thermo_csv": "",
-    "toy_rho_c_rho_s": 5.0,
-    "toy_T_c_MeV": 100.0,
+    "toy_rho_c_rho_s": 5.6,
+    "toy_T_c_MeV": 142.5,
     "toy_mass_GeV": 0.94,
     "toy_cv0": 1.5
   }

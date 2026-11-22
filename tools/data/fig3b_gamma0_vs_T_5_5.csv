@@ -1,0 +1,27 @@
+# Fig. 3 lower panel (fastest growth rate vs temperature, rho = 6.5 rho_s)
+# curve: (eta0,kappa0) = (5,5)
+# source: arXiv:1007.1448 PDF, page 7, vector path with 20 vertices, stroke colour (1.0, 0.0, 0.0), dash '[] 0'
+# mapping: x = -55.7824 + 0.62475525 * X_pt ; y = 3.77184 + -0.011569387 * Y_pt (PDF user-space points, y downwards)
+# calibration: 7 x ticks, 6 y ticks; residuals rms/max x = 0.00302/0.0044, y = 4.16e-16/8.88e-16 (data units)
+# columns in data units
+T_MeV,gamma0_c_per_fm
+5.00309,0.274889
+9.99557,0.276439
+14.9992,0.279331
+20.0035,0.283774
+24.9953,0.289327
+29.9996,0.295552
+35.0033,0.301996
+39.9957,0.30778
+45,0.312663
+50.0037,0.315995
+54.9961,0.317325
+60.0004,0.315775
+65.004,0.316886
+69.9964,0.313993
+75.0001,0.305328
+80.0044,0.288887
+84.9962,0.262891
+90.0005,0.219113
+95.0048,0.157112
+99.9966,0.0744375
