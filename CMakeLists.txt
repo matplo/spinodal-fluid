@@ -20,6 +20,9 @@ add_library(spf
   src/hydro3d_io.cpp
   src/ic_random.cpp
   src/observables.cpp
+  src/linear/thermo.cpp
+  src/linear/dispersion.cpp
+  src/linear/amplification.cpp
 )
 target_include_directories(spf PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -44,6 +47,9 @@ target_compile_definitions(spf_observe PRIVATE SPF_SOURCE_DIR="${CMAKE_CURRENT_S
 add_executable(spf_growth apps/spf_growth.cpp)
 target_link_libraries(spf_growth PRIVATE spf)
 target_compile_definitions(spf_growth PRIVATE SPF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+add_executable(spf_linear apps/spf_linear.cpp)
+target_link_libraries(spf_linear PRIVATE spf)
 
 if(SPF_BUILD_TESTS)
   enable_testing()
