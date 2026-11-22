@@ -799,15 +799,15 @@ The two WP5 expected failures (T5.4 with the default gradient term) are replaced
 ## WP2b - finite-temperature two-phase table and Maxwell partner (2026-11-22)
 
 Construction, parameters and numerical treatment: `docs/eos_finite_T.md`; decision S18 (`eos.finite_T_construction = smoothmax_floor`). Tools: `tools/eos/finite_T/` (`eos2b.py`, `make_coex.py`, `make_finite_T_table.py`, `check_tables.py`, `validate_eos2b.py`, `plot_phase_diagram.py`).
-Tables: 801 x 801 lattice (x = eps/eps_s in [0, 40], dx = 0.05; y = rho/rho_s in [0, 16], dy = 0.02), 602 T values, T <= 250 MeV; the checks below read the full tables (`data/eos/generated/`, SHA-256 in `docs/eos_finite_T.md`); the committed reduced pair is a subset of the same canonical data.
-445015 of 641601 nodes lie on or above the cold curve; checks that involve thermodynamic consistency use only these nodes (below the curve the fields are a smooth continuation, not a state).
+Tables: 801 x 801 lattice (x = eps/eps_s in [0, 40], dx = 0.05; y = rho/rho_s in [0, 16], dy = 0.02), 2361 T values, T <= 250 MeV; the checks below read the full tables (`data/eos/generated/`, SHA-256 in `docs/eos_finite_T.md`); the committed reduced pair is built from the same canonical data.
+445015 of 641601 two-phase nodes lie on or above the cold curve; checks of thermodynamic consistency use only nodes on or above the table's own cold curve (below it the fields are a smooth continuation, not a state).
 
 ### T1 and T2: module, pure-phase curves, low-T quadrature
 
 | test | measured | tolerance | result |
 |---|---|---|---|
 | T1.1 original hadron phase reproduced by `QUADRATURE = "legacy"`, max abs difference | 0.0 | exact | pass |
-| T1.2 f, mu, s at 50 random (T, rho) (T = 5 ... 300 MeV, rho = 0.02 ... 16 rho_s) against the original module (X region, 6 points: s 1.11e-12; quintic, 13 points: f 8.10e-15, mu 4.11e-15, s 1.18e-10; plasma, 31 points: identical) | max relative 1.18e-10 | 1e-10 relative | **fail, marginally** (f, mu, analytic s: pass; the quintic-region s exceeds 1e-10, see note) |
+| T1.2 f, mu, s at 50 random (T, rho) (T = 5 ... 300 MeV, rho = 0.02 ... 16 rho_s) against the original module (X region, 6 points: s 1.11e-12; quintic, 13 points: f 8.10e-15, mu 4.11e-15, s 1.18e-10; plasma, 31 points: identical) | max relative 1.18e-10 | 1e-10 relative | **fail, marginally** (f, mu, analytic s: pass; quintic-region s exceeds 1e-10, see note) |
 | T1.3 `make_coex.py` against the input npz (315 points, T = 0 ... 157 MeV) | rhoH 3.987e-10, rhoQ 1.441e-10 (both at T = 150 MeV) | 1e-8 relative | pass |
 | T2.1 refined nucleon n, p, s against `scipy.integrate.quad` (epsrel 1e-13), T = 0.5, 1, 2, 5, 10 MeV, rho = 0.1 ... 5 rho_s | max relative 2.08e-11 (T = 0.5: 2.08e-11) | 1e-9 | pass |
 | T2.2 same for the original quadrature | T = 0.5: 3.94e-02, 1: 1.79e-04, 2: 5.03e-09, 5: 1.63e-13, 10: 6.31e-14 | - | reported |
@@ -817,16 +817,32 @@ Tables: 801 x 801 lattice (x = eps/eps_s in [0, 40], dx = 0.05; y = rho/rho_s in
 Note on T1.2: the largest deviation, 1.18e-10 (entropy in the quintic region), is from the finite-difference entropy (the original module has no analytic s there; the comparison uses the same 5-point stencil on the original f), i.e. rounding amplified by the stencil; f and mu agree to 6.5e-14.
 With `QUADRATURE = "legacy"` the same 50 points agree with the original module exactly (T1.1), so the 1.2e-10 is the effect of the refined quadrature (relative change of f of about 1e-14) amplified by the 5-point stencil (step 0.05 MeV); it was not hidden by changing the tolerance or the step.
 
-### T4: checks C1 - C7 on the full tables (CPU, `check_tables.py`)
+### R1: T-grid interpolation of mu and p0
+
+The first version of the tables (PCHIP interpolation of mu in T, 602 T rows) changed p0, T, mu, s on halving the T grid by up to 5.7e-4, 9.4e-5, 2.0e-4, 2.1e-7 (two-phase) and 9.2e-3, 4.7e-4, 2.1e-3, 2.4e-6 (Maxwell), relative to max(|value|, 1e-3 max|value|). The tables now use kink nodes, Hermite interpolation of mu, 2361 T rows and an exact re-evaluation of the nodes that still change by more than 1e-6 under halving (`docs/eos_finite_T.md`, Sect. 3):
+
+| quantity | two-phase | Maxwell |
+|---|---|---|
+| change under halving of the T grid before the exact re-evaluation: p0 / T / mu / s | 3.77e-06 / 7.92e-07 / 7.21e-07 / 2.16e-08 | 3.73e-05 / 2.32e-06 / 1.10e-05 / 4.55e-08 |
+| nodes re-evaluated exactly (change > 1e-6 in any field) | 21 of 445015 | 46 of 445632 |
+| largest change of the other nodes: p0 / T / mu / s | 9.89e-07 / 5.70e-07 / 6.20e-07 / 2.16e-08 | 9.92e-07 / 5.70e-07 / 4.39e-07 / 2.16e-08 |
+| largest energy residual |eps_exact(T) - eps| / eps of the re-evaluated nodes | 5.53e-12 | 9.58e-12 |
+| exact evaluation of the model at the inverted T, 150 random nodes: max relative error of eps(T) / p0 / mu / s | 1.14e-08 / 4.41e-11 / 2.29e-10 / 1.26e-08 | 4.60e-08 / 1.80e-10 / 3.82e-10 / 5.25e-08 |
+| same for the 24 nodes with the largest change under halving of the final table | 5.95e-09 / 2.52e-07 / 5.35e-08 / 9.44e-09 | 9.58e-12 / 6.74e-16 / 7.86e-16 / 3.80e-13 |
+
+p0 and mu relative to max(|value|, 1 MeV/fm^3 resp. 1 MeV), T and s relative to the value; eps(T) relative to the lattice eps. Result: the requirement (change of p0, mu, T, s below 1e-6 at every node on or above the cold curve, or exact evaluation) is **met** with the exact re-evaluation of the flagged nodes;
+without it the grid alone does not reach 1e-6 near the kinks (the largest changes sit at rho = 4 - 6 rho_s, T = 125 - 140 MeV and near T_c for the Maxwell table).
+
+### T4: checks C1 - C8 on the full tables (CPU, `check_tables.py`)
 
 | test | two-phase table | Maxwell table | tolerance | result |
 |---|---|---|---|---|
-| C1 max over nodes on or above the cold curve of \|p0 - (T s - eps + mu rho)\| / max(\|p0\|, 1 MeV/fm^3) (largest absolute residual 1.41e-12 GeV/fm^3) | 1.90e-12 | 1.87e-12 | 1e-8 | pass |
-| C2 s against a 5-point finite difference (step 0.1 MeV) of f of the construction (Maxwell: of f of the Maxwell construction) at 200 random lattice nodes (T = 13.6 ... 240 MeV / 3.5 ... 241 MeV), max relative (median) | 2.63e-06 (1.4e-09) | 7.87e-07 (1.7e-09) | 1e-5 | pass |
+| C1 max over nodes on or above the cold curve of \|p0 - (T s - eps + mu rho)\| / max(\|p0\|, 1 MeV/fm^3) (largest absolute residual 2.99e-11 GeV/fm^3) | 6.78e-11 | 1.03e-10 | 1e-8 | pass |
+| C2 s against a 5-point finite difference (step 0.1 MeV) of f of the construction (Maxwell: of f of the Maxwell construction) at 200 random lattice nodes (T = 13.6 ... 240 MeV / 3.5 ... 241 MeV), max relative (median) | 4.03e-07 (5.9e-11) | 7.60e-07 (5.2e-11) | 1e-5 | pass |
 | C3 table nodes with dT/deps <= 0 or ds/deps <= 0 along columns (finite differences, nodes above the curve) | 0 and 0 (min dT/deps 0.0077 GeV fm^3, min ds/deps 4.127 GeV^-1) | 0 and 0 (min 0.0083, 4.127) | none | pass |
 | C3 canonical T grid: pairs of consecutive T nodes with eps(T) not increasing (all 801 columns) | 0 | 0 | 0 | pass |
 
-C3 note: the smallest increment of eps between T nodes (4.6e-128 MeV/fm^3) is the column rho = 0 at low T (pions only, exponentially small); c_v > 0 there in the exact sense only.
+C3 note: the smallest increment of eps between T nodes (1.8e-129 MeV/fm^3) is the column rho = 0 at low T (pions only, exponentially small); c_v > 0 there in the exact sense only.
 
 **C4 sound speed** (bicubic interpolation as in WP2c; evaluated at the nodes on or above each table's own cold curve):
 
@@ -834,15 +850,16 @@ C3 note: the smallest increment of eps between T nodes (4.6e-128 MeV/fm^3) is th
 |---|---|
 | two-phase: min / max v_s^2 over all nodes | -0.4112 / 1.0166 |
 | two-phase: nodes with v_s^2 < 0 and rho >= rho_s outside the isothermal spinodal (f'' < 0 from the canonical grid, dilated by 2 nodes) | 0 (of 6384 negative nodes at rho >= rho_s) |
-| two-phase: nodes inside the isothermal spinodal with v_s^2 > 0 (expected: the isentropic spinodal is smaller) | 9931 of 16315 |
+| two-phase: nodes inside the isothermal spinodal with v_s^2 > 0 (expected: the isentropic spinodal is smaller) | 9933 of 16317 |
 | two-phase: nuclear liquid-gas region (rho < rho_s): nodes with v_s^2 < 0 / minimum | 6 / -0.0206 |
-| Maxwell: min / max v_s^2 at rho >= rho_s | -0.0108 / 1.0166 |
-| Maxwell: nodes with v_s^2 < 0 at rho >= rho_s (first node above the cold curve / elsewhere) | 474 (294 / 180) |
-| isentropic spinodal, T intervals with v_s^2 < 0 at rho >= 1.5 rho_s (canonical lattice) | [[0.0, 111.5], [140.1, 142.2]] MeV |
+| Maxwell: min / max v_s^2 at rho >= rho_s | -0.0102 / 1.0166 |
+| Maxwell: nodes with v_s^2 < 0 at rho >= rho_s (first node above the cold curve / second node) | 442 (296 / 146) |
+| isentropic spinodal, T intervals with v_s^2 < 0 at rho >= 1.5 rho_s (canonical lattice) | [[0.0, 111.9375], [140.05, 142.27]] MeV |
 
-Result: two-phase part **pass** (v_s^2 negative only inside the isothermal spinodal region at rho >= rho_s). Maxwell part **FAIL** (expected failure, reported): the interpolated table has v_s^2 down to -0.0108 at 474 of the nodes of the mixed phase near the cold curve, where the exact v_s^2 of the Gibbs mixture,
-evaluated by finite differences of the canonical Maxwell data (0 at T <= 20 MeV, 0.001 - 0.011 at 50 MeV, 0.01 - 0.07 at 80 MeV), is non negative; the negative values are the discretisation error of the derivatives of p0 in the cells next to the cold curve (cancellation of two terms of order dp/deps = O(0.3) at T -> 0).
-Two continuations below the cold curve were tried (quadratic: minimum -0.055; constant: -0.119; the linear one used gives -0.0108) and none removes it; the C++ sign test uses a node in the interior of the mixed phase (T about 70 MeV), where v_s^2 > 0.
+Result: two-phase part **pass** (v_s^2 negative only inside the isothermal spinodal region at rho >= rho_s). Maxwell part **FAIL** (expected failure, reported; R2): after the improvement of the interpolation (R1) the 442 negative nodes (474 before) have not disappeared. All of them are the first (min -0.0102, 296 nodes)
+or the second (min -0.0027, 146 nodes) lattice node above the cold curve, at T = 0.4 - 27 MeV, rho = 4.5 - 10.4 rho_s, eps = 5.6 - 16.3 eps_s; the worst node is rho = 10.44 rho_s, eps = 16.25 eps_s, T = 5.98 MeV (-0.0102), the next ones lie at rho = 4.5 - 5.0 rho_s, eps = 5.6 - 6.4 eps_s, T = 14 - 17 MeV (-0.006 to -0.008). The exact v_s^2 of the Gibbs mixture there
+(finite differences of the canonical Maxwell data) is non negative (0 at T <= 20 MeV, 0.001 - 0.011 at 50 MeV, 0.01 - 0.07 at 80 MeV); the negative values are the discretisation error of the derivatives of p0 in the cells next to the cold curve (cancellation of two terms of order dp/deps = O(0.3) at T -> 0), not an interpolation error in T.
+Two continuations below the cold curve were tried (quadratic, constant) and are worse. The C++ sign test uses a node in the interior of the mixed phase (T about 70 MeV), where v_s^2 > 0.
 
 Spinodal boundaries (rho/rho_s; the isothermal ones from the canonical lattice and from the tables, the isentropic ones from the zero crossings of the table v_s^2 along the isotherm; "none": v_s^2 > 0 along the whole isotherm at rho >= 1.5 rho_s):
 
@@ -851,14 +868,19 @@ Spinodal boundaries (rho/rho_s; the isothermal ones from the canonical lattice a
 | 0 | 5.488 / 8.610 | - | 5.449 ... 8.610 (8 sign changes, noisy) |
 | 50 | 5.357 / 8.298 | 5.358 / 8.297 | 5.417 / 8.291 |
 | 100 | 5.173 / 7.196 | 5.173 / 7.196 | 5.766 / 7.124 |
-| 130 | 3.794 / 4.812 | 3.795 / 4.811 | none |
+| 130 | 3.794 / 4.812 | 3.794 / 4.812 | none |
 | 140 | 2.752 / 3.454 | 2.752 / 3.454 | none |
 
 | test | measured | reference | result |
 |---|---|---|---|
 | C5 `eps_min(rho)` against `data/eos/cold_curve.dat` (4.2 / 10.5 matching) | max \|diff\| 3.622e-04 GeV/fm^3 = 2.52e-03 eps_s at rho = 6.78 rho_s (relative 2.6e-04); the Maxwell table has its own cold curve (the chord of the cold two-phase f between r1(0) and r2(0)) | difference expected from the matching densities 4.206 / 10.504 | reported |
-| C6 critical point from the tables: isothermal spinodal closes at | T_c = 142.501 MeV, rho_c = 2.93 rho_s (from v_s^2 < 0: T = 142.28 MeV, rho = 3.03); canonical grid: last T with f'' < 0 142.4 MeV, rho_c = 2.94 | 142.50 MeV / 2.94 rho_s | pass (scan step 0.05 MeV, 0.005 rho_s) |
-| C7 development point (5.8 rho_s, eps_min + 2 eps_s, two-phase table, bicubic) | eps = 9.9712 eps_s (1.434065 GeV/fm^3), v_s^2 = 0.008182, h = 1.726561 GeV/fm^3, T = 104.838 MeV, p0 = 0.292496 GeV/fm^3, mu = 1.329760 GeV, s = 5.2131 fm^-3 | cold-thermal T2.4: v_s^2 = -0.05428, h = 1.98840 | reported |
+| C6 critical point from the tables: isothermal spinodal closes at | T_c = 142.501 MeV, rho_c = 2.93 rho_s (from v_s^2 < 0: T = 142.28 MeV, rho = 3.03); canonical grid: last T with f'' < 0 142.4975 MeV, rho_c = 2.94 | 142.50 MeV / 2.94 rho_s (construction); 2.78 rho_s (arXiv:1007.1448 Fig. 5) | pass for the construction (scan step 0.05 MeV, 0.005 rho_s); 2.93 vs 2.78 is a known deviation |
+| C7 development point (5.8 rho_s, eps_min + 2 eps_s, two-phase table, bicubic) | eps = 9.9712 eps_s (1.434065 GeV/fm^3), v_s^2 = 0.008179, h = 1.726561 GeV/fm^3, T = 104.838 MeV, p0 = 0.292496 GeV/fm^3, mu = 1.329760 GeV, s = 5.2131 fm^-3 | cold-thermal T2.4: v_s^2 = -0.05428, h = 1.98840 | reported |
+
+### Known deviations from arXiv:1007.1448 (Fig. 5) and arXiv:1209.2462
+
+Critical density 2.93 rho_s against 2.78 rho_s (Fig. 5 of arXiv:1007.1448); the isentropic spinodal closes at about 111.9 MeV against about 127 MeV in the paper; a spurious isentropic sliver at 140.1 - 142.3 MeV and the bulge of the coexistence curve just below T_c come from the fast change of the matching densities there;
+the development point (5.8 rho_s, eps_min + 2 eps_s) is isentropically stable in this table (v_s^2 = +0.0082), while the cold-thermal EoS gives -0.05428. The figure `docs/figures/eos_phase_T_rho.png` shows the digitised boundaries of Fig. 5 (`tools/data/fig5_boundary_*.csv`) together with ours (including v_s^2 = 0 at fixed s/rho).
 
 ### T5: figures and interface tension
 
@@ -867,8 +889,5 @@ T = 0 MeV: 11.588, T = 50 MeV: 9.805, T = 100 MeV: 2.866, T = 130 MeV: 0.811, T 
 
 ### T7: C++ tests
 
-`tests/test_eos_finite_T.cpp` (2 test cases, 13 assertions): T2b.1, ten lattice values (p0, T, mu, s) of the two committed test tables against `finite_T_reference.json`, max relative deviation 0.000e+00 (tolerance 1e-10); T2b.2, sign of v_s^2 (bicubic): spinodal -0.290987 (< 0), outside 0.092142 (> 0), Maxwell 0.021075 (> 0), agreement with the Python port to 1e-8, pass.
-CPU (`cpu-serial`, after merging origin/main at 4dfe30a): `ctest` 2/2 passed (303 s), `spf_tests`: 87 test cases, all reported passed, 20975 assertions, 20964 passed, 11 failed (the failed assertions are those of the expected-failure test cases of other packages).
-
-GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4), commit 1e59e015520faad422c597faab4ad1d3051e771b (the merge of origin/main 4dfe30a into the branch; later commits change documentation and figures only) built from a fresh clone: `ctest` 2/2 passed (`spf_tests` 55.2 s, total 55.6 s);
-`spf_tests -tc="T2b*"` on CUDA: 2 test cases, 13 assertions, all passed; T2b.1 max relative deviation 0.000e+00 (tolerance 1e-10); T2b.2 v_s^2 -0.290987 (spinodal), 0.092142 (outside), 0.021075 (Maxwell), identical to the CPU values to the digits printed. The assertion totals of the full run were not captured on the GPU node (ctest reports pass).
+`tests/test_eos_finite_T.cpp` (2 test cases, 13 assertions): T2b.1, ten lattice values (p0, T, mu, s) of the two committed test tables against `finite_T_reference.json`, max relative deviation 0.000e+00 (tolerance 1e-10); T2b.2, sign of v_s^2 (bicubic): spinodal -0.290994 (< 0), outside 0.092142 (> 0), Maxwell 0.021074 (> 0), agreement with the Python port to 1e-8.
+CPU (`cpu-serial`, after merging origin/main at db0519e): `ctest` 2/2 passed; `spf_tests`: 89 test cases (0 failed), 20994 assertions, 20985 passed, 9 failed (the failed assertions are those of the expected-failure test cases of other packages).

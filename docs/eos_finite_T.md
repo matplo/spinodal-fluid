@@ -51,41 +51,58 @@ Constants and the parameters above are the module defaults of `eos2b.TwoPhase` (
 
 ## 3. Tables
 
-`make_finite_T_table.py all` (16 processes, about 40 minutes on 16 cores; stages `canonical`, `maxwell`, `tables`, `reference`):
+`make_finite_T_table.py all` (16 processes; stages `canonical`, `maxwell`, `kinks`, `tables`, `reference`; the first three are incremental, rows and kink nodes already computed are kept):
 
-* **Canonical grid.** f, mu, s on the T grid of `t_grid()` (602 values: 0, 0.25, 0.5 ... 10 in steps of 0.5, 10 ... 100 in 1, 100 ... 130 in 0.5, 130 ... 160 in 0.1, 160 ... 200 in 0.5, 200 ... 250 in 1 MeV)
-  for every lattice rho (801 values, step 0.02 rho_s). eps(T, rho = 0) reaches 40 eps_s at T = 244 MeV, so every column covers the lattice (checked: 0 columns exceed the top of the T grid; 0 columns with eps(T) not strictly increasing).
-* **Inversion.** f(T) is interpolated between T nodes by the cubic Hermite polynomial with f' = -s; eps_H(T) = f_H - T f_H' is solved for each lattice eps by bisection; s = -f_H', mu by PCHIP, p0 = mu rho - f_H.
-  The relation p0 = T s - eps + mu rho therefore holds to rounding. Replacing the T grid by every second node changes p0, T, mu, s on the test lattice by at most 5.7e-04, 9.4e-05, 2.0e-04, 2.1e-07 (relative to max(|field|, 1e-3 max|field|); two-phase table; Maxwell table:
-  9.2e-03, 4.7e-04, 2.1e-03, 2.4e-06); the error of the actual grid is smaller, but this is the scale of the T-interpolation error of mu and p0, to be kept in mind when comparing with finite differences of the table.
+* **Canonical grid.** f, mu, s on the T grid of `t_grid()` (2361 values: steps 0.05 MeV for T < 4, 0.1 up to 10, 0.25 up to 100, 0.0625 up to 130, 0.025 up to 142, 0.01 up to 143 (and 0.0025 for 142.3 - 142.6), 0.05 up to 160, 0.125 up to 200, 1.0 up to 250)
+  for every lattice rho (801 values, step 0.02 rho_s). eps(T, rho = 0) reaches 40 eps_s at T = 244 MeV, so every column covers the lattice (0 columns exceed the top of the T grid; 0 columns with eps(T) not strictly increasing).
+  The grid was refined (602, 1711, 2271, 2361 rows) until the change of the tables under halving of the grid was small, see below.
+* **Kink nodes.** At fixed rho, f(T) has kinks (discontinuous third derivative, or second derivative at the hull edges) at the temperatures where rho = a(T), b(T), and, in the Maxwell table, rho = rho_1(T), rho_2(T).
+  Cubic Hermite interpolation in a cell that contains a kink is only O(h^2) accurate. For every lattice rho these temperatures (529 matching-density kinks, 505 hull-edge kinks) are added as extra nodes of that column
+  with f, mu, s and d mu/dT = -ds/drho (5-point difference in rho at step 0.001 rho_s, one-sided values at the hull edges) evaluated exactly by the model. A kink node that, because of the finite accuracy of its T near T_c,
+  would break the monotonicity of eps(T) in its column is dropped (6 columns of the Maxwell table, between T = 141.97 and 142.38 MeV).
+* **Inversion.** For every rho column f(T) is interpolated between the nodes by the cubic Hermite polynomial with f' = -s, and mu(T) by the cubic Hermite polynomial with the derivative d mu/dT: the derivative of the cubic
+  spline of mu(T) on the segments between kink nodes, clamped at the segment ends with the exact derivatives (the rho-difference value at the ends of the column). eps_H(T) = f_H - T f_H' is solved for each lattice eps by bisection;
+  s = -f_H', p0 = mu rho - f_H, so p0 = T s - eps + mu rho holds to rounding. (The first version of this package interpolated mu by PCHIP; halving the T grid then changed p0 by up to 5.7e-4 (two-phase) and 9.2e-3 (Maxwell).)
+* **Exact refinement of flagged nodes.** The T grid is halved (every second row dropped, kink nodes kept) and the tables are rebuilt; every node on or above the cold curve at which p0, T, mu or s changes by more than 1e-6 relative is
+  replaced by the exact model value: the temperature is re-solved by a secant iteration on eps_exact(T) = eps (the model is evaluated at the trial T; for the Maxwell table the hull is evaluated at that T), and p0, mu, s are the exact values there
+  (energy residual 5.5e-12, 9.6e-12). Change under halving before this step: two-phase table p0 3.8e-06, T 7.9e-07, mu 7.2e-07, s 2.2e-08; 21 of 445015 nodes flagged.
+  Maxwell table: p0 3.7e-05, T 2.3e-06, mu 1.1e-05, s 4.6e-08; 46 of 445632 flagged.
+  All other nodes change by less than 1e-6 (largest: two-phase p0 9.9e-07, T 5.7e-07, mu 6.2e-07, s 2.2e-08; Maxwell p0 9.9e-07, T 5.7e-07, mu 4.4e-07, s 2.2e-08).
+  p0 and mu are measured relative to max(|value|, 1 MeV/fm^3 or 1 MeV), T and s relative to the value. The refinement report is stored in the table header (`generator.exact_refinement`).
 * **Below the cold curve** (eps < eps_min(rho)) every field is continued linearly in eps through its cold value at eps_min and the value at the first lattice node above the curve (finite, smooth, never returned by the reader).
-  A quadratic and a constant continuation were tried and gave larger v_s^2 errors at the first nodes above the curve (Maxwell table, minimum v_s^2 -0.055 and -0.119 against -0.0108 for the linear one).
-* **Maxwell partner.** For each T below T_c: lower convex hull of f over rho >= rho_s on a fine grid (step 0.01 rho_s), refined by solving mu(r1) = mu(r2), p(r1) = p(r2) with fsolve (all 297 temperature rows converged without falling back to the hull vertices);
+  A quadratic and a constant continuation were tried and gave larger v_s^2 errors at the first nodes above the curve (Maxwell table, minimum v_s^2 -0.055 and -0.119 against -0.0108 for the linear one with the first version of the table).
+* **Maxwell partner.** For each T below T_c: lower convex hull of f over rho >= rho_s on a fine grid (step 0.01 rho_s), refined by solving mu(r1) = mu(r2), p(r1) = p(r2) with fsolve (all temperature rows converged without falling back to the hull vertices);
   for r1 < rho < r2: f = f(r1) + mu_coex (rho - r1), mu = mu_coex, s linearly interpolated between s(r1) and s(r2) (Gibbs mixture). The region rho < rho_s (nuclear liquid-gas) is unchanged. The hull exists for T up to 142.5 MeV on the grid.
   The Maxwell table has its own cold curve eps_min(rho) = eps(T = 0), linear in rho between r1(0) and r2(0).
-* **Files.** Full tables (801 x 801; 20.5 MB each) are written to `data/eos/generated/` (git-ignored) with SHA-256 of the `.bin`: two-phase `10ef0d11903ed371e4b391fb9417a949552649d7268be1fb458a55641149e345`, Maxwell `6ad97322208a95a700d6ee257014cd97b80dbb4c3f724eb9f2fab5c125152e89`.
+* **Files.** Full tables (801 x 801; 20.5 MB each) are written to `data/eos/generated/` (git-ignored) with SHA-256 of the `.bin`: two-phase `3702ebde72cd7071552549af6bbe69a84afd10841335552d1cf0cc32284a78bc`, Maxwell `ed86c63c2b3ca061730de4516f23a66e7dd30eb1ecccb770e54adb44a38aa52a`.
   A reduced pair (step 0.2 in eps/eps_s, 0.08 in rho/rho_s; 201 x 201, 1.3 MB each) is committed in `data/eos/test/` with `finite_T_reference.json` for `tests/test_eos_finite_T.cpp`.
   Config keys: `eos.finite_T_construction`, `eos.table_path_two_phase`, `eos.table_path_maxwell` (and `_test` variants); to run with a table set `eos.model = table_two_phase | table_maxwell` and `eos.table_path` to one of them.
 
-## 4. Properties measured and deviations from the papers
+## 4. Properties measured and known deviations from the papers
 
-* Critical point: T_c = 142.50 MeV, rho_c = 2.93 rho_s from the tables (isothermal), reference 142.50 MeV / 2.94 rho_s of the construction. **The papers' figures put rho_c near 2.6 - 2.75 rho_s** (read by eye);
-  in this family rho_c stays close to the pure plasma coexistence density at T_c, about 3 rho_s. This is a known deviation and is kept.
-* At T = 0 the two-phase coexistence densities are 5.488 / 8.610 rho_s for the spinodal (isothermal = isentropic at T = 0), against 5.488 / 8.610 of the earlier cold curve.
-* The **isentropic** spinodal region (v_s^2 < 0) does not coincide with the isothermal one: from the canonical lattice v_s^2 < 0 (rho >= 1.5 rho_s) only for T in 0 - 111.5 MeV and in a narrow pocket 140.1 - 142.2 MeV near rho_c (v_s^2 > 0 everywhere for 111.5 < T < 140.1 MeV although the isothermal spinodal exists up to 142.5 MeV).
-  This follows from the thermal contribution to v_s^2 and is a property of the construction, not of the table; it matters for the instability of hydrodynamic runs at finite T.
-* The coexistence density rho_1(T) is not monotonic (it rises from T = 80 to 100 MeV, and bends back to lower density for T above about 138 MeV before the critical point; figure `eos_phase_T_rho.png`): the matching densities are tied to the pure-phase curves.
-* The C++ development point (5.8 rho_s, eps_min + 2 eps_s) has v_s^2 = 0.00818 > 0 in this table (T = 104.84 MeV), while the cold-thermal development equation of state gives -0.05428 at the same point: runs with the finite-T tables are not unstable there.
+Known deviations of this construction from the papers (arXiv:1007.1448 Fig. 5, arXiv:1209.2462 Fig. 1; digitised boundaries of Fig. 5 are in `tools/data/fig5_boundary_*.csv` and drawn in `docs/figures/eos_phase_T_rho.png`):
+
+1. **Critical density.** T_c = 142.50 MeV, rho_c = 2.93 rho_s from the tables (construction: 142.50 MeV, 2.94 rho_s), against rho_c = 2.78 rho_s in Fig. 5 of arXiv:1007.1448 (2.6 - 2.75 read by eye from the figures of the other paper):
+   in this family rho_c stays close to the pure plasma coexistence density at T_c, about 3 rho_s.
+2. **Isentropic spinodal.** The isentropic spinodal (v_s^2 = 0 at fixed s/rho) closes at about 111.9 MeV (canonical lattice: v_s^2 < 0 at rho >= 1.5 rho_s for T = 0 - 111.938 MeV), against about 127 MeV in Fig. 5 of arXiv:1007.1448;
+   v_s^2 > 0 everywhere for 112 < T < 140 MeV although the isothermal spinodal exists up to 142.5 MeV. This follows from the thermal contribution to v_s^2 and from the depth of the concavity of f at these temperatures.
+3. **Spurious isentropic sliver and bulge of the coexistence curve.** A narrow pocket with v_s^2 < 0 at T = 140.05 - 142.27 MeV near rho_c, and a bulge of the coexistence curve just below T_c (rho_1(T) bends back to lower density for T above about 138 MeV, and rises
+   between 80 and 100 MeV), come from the fast change of the matching densities a(T), b(T) there (the matching densities follow the pure-phase coexistence curves, which end at T_max).
+4. **Development point.** The point (5.8 rho_s, eps_min + 2 eps_s) is isentropically stable in this table: v_s^2 = +0.0082 at T = 104.84 MeV, while the cold-thermal development equation of state gives -0.05428 at the same point; runs with the finite-T tables are not unstable there.
+5. At T = 0 the spinodal densities are 5.488 / 8.610 rho_s (isothermal = isentropic at T = 0), against 5.488 / 8.610 of the earlier cold curve (matching densities 4.206 / 10.504 instead of 4.2 / 10.5).
+6. **Maxwell table, v_s^2 next to the cold curve.** v_s^2 of the Gibbs mixture is non negative (canonical data), but the interpolated table has 442 nodes with v_s^2 < 0 at rho >= rho_s, all of them the first or second lattice node above the cold curve
+   (T <= 27 MeV, rho = 4.5 - 10.4 rho_s, eps = 5.6 - 16.3 eps_s; minimum -0.0102, second node -0.0027): the discretisation error of the derivatives of p0 in the cells next to the cold curve, where two terms of order dp/deps = O(0.3) cancel.
 
 ## 5. Figures (`tools/eos/finite_T/plot_phase_diagram.py`)
 
-`docs/figures/eos_phase_T_rho.png` (phase diagram in (rho/rho_s, T)), `eos_phase_eps_rho.png` (the same in (rho/rho_s, eps/eps_s), compare Fig. 1 of arXiv:1209.2462), `eos_sigma_T.png` (interface tension sigma_T(T) = a Int sqrt(2 eps_s Delta f) d(rho/rho_s), compare Fig. 2 of arXiv:1209.2462).
+`docs/figures/eos_phase_T_rho.png` (phase diagram in (rho/rho_s, T): pure-phase coexistence, two-phase coexistence, isothermal spinodal, our isentropic spinodal (v_s^2 = 0), critical point, and the digitised coexistence, isothermal-spinodal and isentropic-spinodal boundaries of Fig. 5 of arXiv:1007.1448),
+`eos_phase_eps_rho.png` (the same in (rho/rho_s, eps/eps_s), compare Fig. 1 of arXiv:1209.2462), `eos_sigma_T.png` (interface tension sigma_T(T) = a Int sqrt(2 eps_s Delta f) d(rho/rho_s), compare Fig. 2 of arXiv:1209.2462).
 sigma_T (a = 0.033 fm): 0 MeV: 11.588, 50 MeV: 9.805, 100 MeV: 2.866, 130 MeV: 0.811, 140 MeV: 0.331 MeV/fm^2.
 
 ## 6. Regeneration
 
     python tools/eos/finite_T/make_coex.py --out data/eos/finite_T/coex_pure.npz     # pure-phase curves
-    python tools/eos/finite_T/make_finite_T_table.py all --nproc 16                  # tables + test pair + reference JSON (about 40 min on 16 cores)
+    python tools/eos/finite_T/make_finite_T_table.py all --nproc 16                  # canonical rows, hull, kink nodes, tables + test pair + reference JSON (several hours on 16 cores)
     python tools/eos/finite_T/check_tables.py --json checks.json                     # C1 - C7
     python tools/eos/finite_T/plot_phase_diagram.py --check checks.json              # figures, sigma_T
     python tools/eos/finite_T/validate_eos2b.py --input <original eos2b.py>          # comparison with the reviewed module, quadrature accuracy
