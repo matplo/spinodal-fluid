@@ -891,3 +891,6 @@ T = 0 MeV: 11.588, T = 50 MeV: 9.805, T = 100 MeV: 2.866, T = 130 MeV: 0.811, T 
 
 `tests/test_eos_finite_T.cpp` (2 test cases, 13 assertions): T2b.1, ten lattice values (p0, T, mu, s) of the two committed test tables against `finite_T_reference.json`, max relative deviation 0.000e+00 (tolerance 1e-10); T2b.2, sign of v_s^2 (bicubic): spinodal -0.290994 (< 0), outside 0.092142 (> 0), Maxwell 0.021074 (> 0), agreement with the Python port to 1e-8.
 CPU (`cpu-serial`, after merging origin/main at db0519e): `ctest` 2/2 passed; `spf_tests`: 89 test cases (0 failed), 20994 assertions, 20985 passed, 9 failed (the failed assertions are those of the expected-failure test cases of other packages).
+
+GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4), commit 1f3dd79ab0e21bd61744b899b8969b8a30942802 (the head before this paragraph, which only adds this text) built from a fresh clone: `ctest` 2/2 passed (58.4 s);
+`spf_tests`: 89 test cases (89 passed, 0 failed), 20994 assertions, 20985 passed, 9 failed (the same expected failures as on the CPU: 89 / 20994 / 20985 / 9); `spf_tests -tc="T2b*"`: 2 test cases, 13 assertions, all passed, max relative deviation of the ten lattice values 0.000e+00 (tolerance 1e-10), v_s^2 -0.290994 (spinodal), 0.092142 (outside), 0.021074 (Maxwell), identical to the CPU values.
