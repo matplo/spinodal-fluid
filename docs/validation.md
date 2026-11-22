@@ -681,6 +681,7 @@ Derived trajectories for `spf_linear`: `trajectory_3fluid_5_markers.csv`, `traje
 
 CPU (workstation, head b22de57 for the code): `ctest` 2/2 on `cpu-serial` (280 s) and on `cpu-openmp` (16 threads, 668 s); `spf_tests`: 77 test cases, 20809 assertions, 20800 passed, 9 failed; the nine failed assertions are the eight expected failures of WP4 (`doctest::may_fail`) and the one expected failure T8.5b (`should_fail`); no other failure. WP8 adds 9 test cases (T8.0, T8.1, T8.2, T8.3, T8.4, T8.5, T8.5b, T8.5c, T8.5d).
 GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4), head b22de57 built from a fresh clone of the branch: `ctest` 2/2 passed (`spf_tests` 54.2 s); 77 test cases, 20809 assertions, 20800 passed, 9 failed (the same nine expected failures); the `T8.` numbers on the GPU node coincide with the CPU values (the library runs on the host). `spf_linear` ran on the dense 3-fluid trajectory. The remote clone was deleted.
+
 ## WP5 - initial conditions from a hadron cascade (2026-11-22)
 
 Documentation of the method: `docs/initial_state.md`. Code under test: `include/spf/initial_state.hpp`, `src/initial_state.cpp`, `apps/spf_ic.cpp`,
