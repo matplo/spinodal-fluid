@@ -176,15 +176,16 @@ TEST_CASE("analytic counter-streaming state") {
 namespace {
 
 // Glauber-Gaussians state (416 hadrons, 64^3 cells of 0.5 fm), 2 fm/c, returns {initial failures, failures during the run, limiter cells}.
-struct RunCounts { long f0, fail_run, limiter; double r_ratio, e_ratio; };
+struct RunCounts { long f0, fail_run, limiter; double r_ratio, e_ratio; long floor_cells; };
 
 template <class EoS>
-RunCounts run_proxy(const EoS& eos, const char* gradient_form, const char* name) {
+RunCounts run_proxy(const EoS& eos, const char* gradient_form, const char* name, const char* pex_floor_kappa = nullptr) {
   Config cfg = Config::from_file(SPF_DEFAULT_CONFIG);
   cfg.set_from_string("ic.generator=glauber_gaussians");
   cfg.set_from_string("grid.nx=64"); cfg.set_from_string("grid.ny=64"); cfg.set_from_string("grid.nz=64");
   cfg.set_from_string("grid.dx_fm=0.5");
   cfg.set_from_string(std::string("gradient.form=") + gradient_form);
+  if (pex_floor_kappa) cfg.set_from_string(std::string("gradient.pex_floor_kappa=") + pex_floor_kappa);
   const Hydro3DParams hp = Hydro3DParams::from_config(cfg);
   const Grid g = Grid::make_3d(64, 64, 64, 0.5);
   const InitialState st = build_initial_state(cfg, g);
@@ -197,9 +198,10 @@ RunCounts run_proxy(const EoS& eos, const char* gradient_form, const char* name)
   const long f0 = h.update_primitives();
   h.run(static_cast<long>(std::ceil(2.0 / h.dt() - 1e-9)));
   const Totals t1 = h.totals();
-  RunCounts rc{f0, h.n_recover_fail_total - f0, h.n_clamped_total, t1.R / t0.R, t1.E / t0.E};
-  std::printf("T5.4 proxy %s, gradient.form=%s: initial recovery failures %ld, failures during run %ld, limiter cells %ld, R/R0 %.9f E/E0 %.9f\n", name,
-              gradient_form, rc.f0, rc.fail_run, rc.limiter, rc.r_ratio, rc.e_ratio);
+  RunCounts rc{f0, h.n_recover_fail_total - f0, h.n_clamped_total, t1.R / t0.R, t1.E / t0.E, h.n_pex_floor_total};
+  std::printf("T5.4 proxy %s, gradient.form=%s, pex_floor_kappa=%s: initial recovery failures %ld, failures during run %ld, limiter cells %ld, "
+              "p_extra floor cells %ld, R/R0 %.9f E/E0 %.9f\n", name, gradient_form, pex_floor_kappa ? pex_floor_kappa : "default", rc.f0, rc.fail_run,
+              rc.limiter, rc.floor_cells, rc.r_ratio, rc.e_ratio);
   return rc;
 }
 
@@ -214,13 +216,20 @@ TEST_CASE("T5.4 proxy: Glauber-Gaussians state, 2 fm/c, gradient term off: no re
   CHECK(b.f0 == 0); CHECK(b.fail_run == 0);
 }
 
-// Measured: with the default gradient.form = paper_pressure the dilute fringe of the deposited state (E < 0.035 GeV/fm^3, |M| ~ E after the
-// limiter) breaks the primitive recovery (p_grad < 0 there): thousands of cells fail, for both equations of state. Kept as an expected
-// failure and reported (docs/validation.md, WP5, T5.4).
-TEST_CASE("T5.4 proxy: default gradient term (paper_pressure) fails in the dilute fringe" * doctest::may_fail()) {
+// With gradient.form = paper_pressure the dilute fringe of the deposited state (E < 0.035 GeV/fm^3, |M| ~ E after the limiter) has
+// p_grad < 0, and without a floor the primitive recovery has no root there (thousands of failing cells, both equations of state).
+// The default gradient.pex_floor_kappa = 0.5 raises p_extra to -kappa (E - |M| + p0(E - |M|, 0)) in exactly those cells.
+TEST_CASE("T5.4 proxy: default gradient term with the recovery floor: no recovery failures (ideal and cold-thermal two-phase)") {
   const ColdCurveTable tab = ColdCurveTable::load(std::string(SPF_SOURCE_DIR) + "/data/eos/cold_curve.dat");
   const RunCounts a = run_proxy(EosIdeal{}, "paper_pressure", "ideal");
-  CHECK(a.fail_run == 0);
+  CHECK(a.f0 == 0); CHECK(a.fail_run == 0); CHECK(a.floor_cells > 0);
+  CHECK(a.r_ratio == doctest::Approx(1.0).epsilon(1e-6));
   const RunCounts b = run_proxy(EosColdThermal(tab, ColdVariant::two_phase, 4.0 / 3.0), "paper_pressure", "cold_thermal_two_phase");
-  CHECK(b.fail_run == 0);
+  CHECK(b.f0 == 0); CHECK(b.fail_run == 0); CHECK(b.floor_cells > 0);
+  CHECK(b.r_ratio == doctest::Approx(1.0).epsilon(1e-6));
+}
+
+TEST_CASE("T5.4 proxy: gradient term without the floor (pex_floor_kappa = -1) still fails in the dilute fringe") {
+  const RunCounts a = run_proxy(EosIdeal{}, "paper_pressure", "ideal", "-1");
+  CHECK(a.fail_run > 0); CHECK(a.floor_cells == 0);
 }
