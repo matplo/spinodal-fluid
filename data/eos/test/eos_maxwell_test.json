@@ -1,0 +1,59 @@
+{
+  "format": "spf_eos_table",
+  "format_version": 1,
+  "description": "Maxwell partner of eos_two_phase: for T < T_c the free energy at rho >= rho_s is replaced by its lower convex hull (linear between rho1(T) and rho2(T), mu = mu_coex, s = Gibbs mixture); identical elsewhere (docs/eos_finite_T.md). REDUCED TEST LATTICE for CI (step 0.2 in x, 0.08 in y).",
+  "byte_order": "little",
+  "dtype": "float64",
+  "lattice": {
+    "rho_s_fm3": 0.153,
+    "m_N_GeV": 0.94,
+    "x0": 0.0,
+    "dx": 0.2,
+    "nx": 201,
+    "y0": 0.0,
+    "dy": 0.08,
+    "ny": 201
+  },
+  "index_order": "p0, T, mu, s: C order, shape (nx, ny), element (ix, iy) at flat index ix*ny + iy (iy fastest); eps_min: shape (ny,) indexed by iy; all float64 little-endian, fields stored consecutively in the order of 'fields'",
+  "fields": [
+    "p0",
+    "T",
+    "mu",
+    "s",
+    "eps_min"
+  ],
+  "units": {
+    "p0": "GeV/fm^3",
+    "T": "GeV",
+    "mu": "GeV",
+    "s": "fm^-3",
+    "eps_min": "GeV/fm^3"
+  },
+  "bin_size_bytes": 1294440,
+  "sha256": "5df1515739fa90c0484c577fe23863ece8ccaf5657e0ab27d4a72f64dae5d0ac",
+  "generator": {
+    "tool": "tools/eos/finite_T/make_finite_T_table.py",
+    "construction": "smoothmax_floor",
+    "T_grid_points": 2361,
+    "T_max_MeV": 250.0,
+    "kink_nodes": true,
+    "exact_refinement": {
+      "threshold": 1e-06,
+      "halving_change_max_before": {
+        "p0": 1.9245081953252972e-06,
+        "T": 2.950501661993613e-07,
+        "mu": 8.515539343825251e-07,
+        "s": 1.8394408763628496e-09
+      },
+      "nodes_refined": 1,
+      "nodes_above_cold_curve": 28029,
+      "halving_change_max_unrefined_nodes": {
+        "p0": 9.918659235599935e-07,
+        "T": 2.950501661993613e-07,
+        "mu": 4.392063558243776e-07,
+        "s": 1.8394408763628496e-09
+      },
+      "max_energy_residual_of_refined": 9.060117251543483e-14
+    }
+  }
+}
