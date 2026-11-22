@@ -195,6 +195,15 @@ by the regula-falsi/Illinois iteration of section 4 (at most 60 iterations, fail
 (it is a field evaluated from earlier primitives, "lagged"). The bracket needs `g(1) >= 0`, which holds for `p_extra >= 0` and for small negative values;
 a cell where it fails is flagged.
 
+Floor (`gradient.pex_floor_kappa = kappa`, default 0.5; decision S17). `g(1) = E - |M| + p0(E - |M|, 0) + p_extra`. If `g(1) < 0` and `kappa >= 0`,
+the recovery of that cell uses
+
+    p_extra -> -kappa (E - |M| + p0(E - |M|, 0)),
+
+so that `g(1) = (1 - kappa)(E - |M| + p0(E - |M|, 0)) >= 0` and a root exists for `0 <= kappa < 1`; the returned pressure contains the floored value.
+Such cells lie at the `E = |M|` limiter surface of dilute fringes, where the Gaussian tail of the density makes `p_grad = -a^2 (eps_s/rho_s^2) rho Lap(rho)`
+negative. Conservation is unaffected (only the pressure of those cells changes); the count is reported as `n_pex_floor_total`.
+
 ## 9. Snapshots
 
 `Hydro3D::write_snapshot(base, fields, config)` writes `<base>.bin` (raw little-endian float64, the requested fields concatenated, each in C order

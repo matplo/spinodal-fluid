@@ -779,6 +779,23 @@ GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4)
 `spf_tests`: 76 test cases, 905 assertions, 895 passed, 10 failed (the same expected failures). `spf_ic` on the SMASH event (3 A GeV, event 0, 160^3) runs on CUDA with the central values of the table in T5.4 / T5.2.
 Not run on the GPU: the 45-event T5.2 scan (run with the OpenMP build; the GPU run of event 0 gives the same central values to 4 digits).
 
+## Recovery floor for the extra pressure (gradient.pex_floor_kappa, decision S17)
+
+Problem (WP5, T5.4): with the default `gradient.form = paper_pressure`, deposited initial states failed the primitive recovery in their dilute
+outer fringe (cells at the `E = |M|` limiter surface with negative `p_grad`; `g(1) < 0`, no root). Fix: floor on `p_extra` inside `recover_core`
+(`docs/equations.md`, Sect. 8). Tests (`tests/test_initial_state.cpp`, `tests/test_hydro3d.cpp`), CPU (`cpu-openmp`):
+
+| Test | Measured | Required | Result |
+|---|---|---|---|
+| T5.4 proxy (Glauber-Gaussians, 64^3, dx = 0.5 fm, 2 fm/c), ideal EoS, gradient on, kappa = 0.5 | 0 recovery failures; floor acted in 96906 cell recoveries; R/R0 = 0.999999991, E/E0 = 1.000000013 (same as gradient off) | 0 failures | pass |
+| same, cold-thermal two-phase EoS | 0 failures; 87030 floor activations; R/R0 = 0.999999965, E/E0 = 1.000000002 | 0 failures | pass |
+| same, ideal EoS, floor disabled (kappa = -1) | 69000 failures during the run | > 0 (documents the mechanism) | pass |
+| `recover_core` on a cell with E - |M| = 1e-3 E, p_extra = -0.01 E | no floor: flagged; kappa = 0.5: recovered, v = 0.999000499002, p_extra used = -1.3333e-5 GeV/fm^3, v = |M|/(E + p) to 1e-10 | as stated | pass |
+| `recover_core` on a cell with a root | p_extra unchanged | unchanged | pass |
+
+The two WP5 expected failures (T5.4 with the default gradient term) are replaced by the tests above.
+
+
 ## WP2b - finite-temperature two-phase table and Maxwell partner (2026-11-22)
 
 Construction, parameters and numerical treatment: `docs/eos_finite_T.md`; decision S18 (`eos.finite_T_construction = smoothmax_floor`). Tools: `tools/eos/finite_T/` (`eos2b.py`, `make_coex.py`, `make_finite_T_table.py`, `check_tables.py`, `validate_eos2b.py`, `plot_phase_diagram.py`).

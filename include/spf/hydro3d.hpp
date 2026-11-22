@@ -55,8 +55,11 @@ struct Hydro3DParams {
 inline constexpr Real kRecover3MaTol = 1e-12;  // relative excess of |M| over E treated as rounding
 
 template <class EoS>
+// pex_floor_kappa >= 0: in a cell where the extra pressure would leave no root (g(1) < 0, e.g. a negative gradient pressure on a
+// cell at the E = |M| limiter surface of a dilute fringe), it is raised to -kappa (E - |M| + p0(E - |M|, 0)); bit 1 of the return
+// value (value 2) marks such a cell, bit 0 (value 1) a failure. Negative kappa: no floor.
 KOKKOS_INLINE_FUNCTION int recover_core(const EoS& eos, Real R, Real Ma, Real E, Real e_vac, Real pex, Real& eps, Real& rho,
-                                        Real& c_out, Real& p) {
+                                        Real& c_out, Real& p, Real pex_floor_kappa = -1.0) {
   eps = 0.0; rho = 0.0; c_out = 0.0; p = 0.0;
   if (E < e_vac) return 0;
   const Real Rp = R > 0.0 ? R : 0.0;
@@ -71,9 +74,16 @@ KOKKOS_INLINE_FUNCTION int recover_core(const EoS& eos, Real R, Real Ma, Real E,
   Real a = 0.0, ga = -Ma;
   Real b = 1.0;
   Real gb;
+  int floored = 0;
   {
     const Real e1 = E - Ma > 0.0 ? E - Ma : 0.0;
-    gb = E + (eos.p0(e1, 0.0) + pex) - Ma;
+    const Real p01 = eos.p0(e1, 0.0);
+    gb = E + (p01 + pex) - Ma;
+    if (gb < 0.0 && pex_floor_kappa >= 0.0) {
+      pex = -pex_floor_kappa * (e1 + p01);
+      gb = E + (p01 + pex) - Ma;
+      floored = 2;
+    }
   }
   int fail = 0;
   Real c = Ma / E;
@@ -112,7 +122,7 @@ KOKKOS_INLINE_FUNCTION int recover_core(const EoS& eos, Real R, Real Ma, Real E,
   if (eps < 0.0) eps = 0.0;
   rho = Rp * Kokkos::sqrt(1.0 - c * c);
   p = eos.p0(eps, rho) + pex;
-  return fail;
+  return fail | floored;
 }
 
 // Host files: raw little-endian doubles (all requested fields concatenated, each in C order [ix][iy][iz], interior cells only)
@@ -143,13 +153,14 @@ struct Recover3K {
   Field3 rho_rf;     // rest-frame density of the recovery (written when write_rho != 0)
   int write_rho;
   int force_only;    // 1: the recovery uses p0 alone; pex is added to the flux terms only (gradient.in_primitive_recovery)
+  Real kappa;        // gradient.pex_floor_kappa (negative: no floor)
   KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
     const Real mx = Mx(i, j, k), my = My(i, j, k), mz = Mz(i, j, k);
     const Real Ma = Kokkos::sqrt(mx * mx + my * my + mz * mz);
     const Real pe = use_pex ? pex(i, j, k) : 0.0;
     const Real pe_rec = force_only ? 0.0 : pe;
     Real ee, rr, c, pp;
-    const int fl = recover_core(eos, R(i, j, k), Ma, E(i, j, k), e_vac, pe_rec, ee, rr, c, pp);
+    const int fl = recover_core(eos, R(i, j, k), Ma, E(i, j, k), e_vac, pe_rec, ee, rr, c, pp, kappa);
     if (force_only) pp += pe;
     if (write_rho) rho_rf(i, j, k) = rr;
     const Real md = dir == 0 ? mx : (dir == 1 ? my : mz);
@@ -170,13 +181,14 @@ struct PrimOutK {
   Kokkos::View<int***> fail;
   int use_pex;
   int force_only;
+  Real kappa;        // gradient.pex_floor_kappa (negative: no floor)
   KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
     const Real mx = Mx(i, j, k), my = My(i, j, k), mz = Mz(i, j, k);
     const Real Ma = Kokkos::sqrt(mx * mx + my * my + mz * mz);
     const Real pe = use_pex ? pex(i, j, k) : 0.0;
     const Real pe_rec = force_only ? 0.0 : pe;
     Real ee, rr, c, pp;
-    const int fl = recover_core(eos, R(i, j, k), Ma, E(i, j, k), e_vac, pe_rec, ee, rr, c, pp);
+    const int fl = recover_core(eos, R(i, j, k), Ma, E(i, j, k), e_vac, pe_rec, ee, rr, c, pp, kappa);
     if (force_only) pp += pe;
     eps(i, j, k) = ee; rho(i, j, k) = rr; p(i, j, k) = pp;
     vx(i, j, k) = Ma > 0.0 ? c * (mx / Ma) : 0.0;
@@ -210,7 +222,12 @@ struct ConsFromPrim3K {
 
 struct CountFail3K {
   Kokkos::View<int***> fail;
-  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, long& acc) const { acc += fail(i, j, k); }
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, long& acc) const { acc += fail(i, j, k) & 1; }
+};
+
+struct CountFloor3K {
+  Kokkos::View<int***> fail;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, long& acc) const { acc += (fail(i, j, k) >> 1) & 1; }
 };
 
 struct Enforce3K {
@@ -262,6 +279,7 @@ class Hydro3D {
   Real min_pgrad_ratio_seen = 0.0;  // most negative p_grad / p0 over the samples taken by sample_pgrad_ratio()
   Field3 eps, rho, vx, vy, vz, p_out;  // primitives of the last update_primitives() (allocated on first use)
   long n_clamped_total = 0, n_recover_fail_total = 0, steps = 0;
+  long n_pex_floor_total = 0;  // recovered cells in which the floor on p_extra acted (gradient.pex_floor_kappa), summed
   Real time = 0.0;
 
   Hydro3D(const EoS& eos_, const Hydro3DParams& hp)
@@ -350,6 +368,7 @@ class Hydro3D {
   // The finite-range pressure is applied (form != off and the hook is enabled).
   bool gradient_on() const { return grad.form != GradientForm::Off && use_p_extra; }
   bool force_only() const { return gradient_on() && grad.recovery == GradientRecovery::ForceOnly; }
+  Real pex_kappa() const { return gradient_on() ? grad.pex_floor_kappa : -1.0; }
 
   // Fill rho_rf from a recovery of U (use after writing U directly, e.g. from an initial-condition generator).
   // Uses the current p_extra (zero at start).
@@ -396,7 +415,7 @@ class Hydro3D {
     }
     Kokkos::parallel_for("hydro3d_primitives", interior_policy(grid),
                          detail::PrimOutK<EoS>{eos, prm.e_vac, U[0], U[1], U[2], U[3], U[4], p_extra, eps, rho, vx, vy, vz, p_out,
-                                               fail_, use_p_extra ? 1 : 0, force_only() ? 1 : 0});
+                                               fail_, use_p_extra ? 1 : 0, force_only() ? 1 : 0, pex_kappa()});
     return count_fail();
   }
 
@@ -489,6 +508,11 @@ class Hydro3D {
     long nf = 0;
     Kokkos::parallel_reduce("hydro3d_count_fail", interior_policy(grid), detail::CountFail3K{fail_}, nf);
     n_recover_fail_total += nf;
+    if (pex_kappa() >= 0.0) {
+      long nfl = 0;
+      Kokkos::parallel_reduce("hydro3d_count_floor", interior_policy(grid), detail::CountFloor3K{fail_}, nfl);
+      n_pex_floor_total += nfl;
+    }
     return nf;
   }
 
@@ -515,7 +539,7 @@ class Hydro3D {
     e[dir] = grid.size(dir);
     Kokkos::parallel_for("hydro3d_recover", make_policy(b, e),
                          detail::Recover3K<EoS>{eos, prm.e_vac, Q[0], Q[1], Q[2], Q[3], Q[4], p_extra, p_, vd_, pvd_, fail_, dir,
-                                                use_p_extra ? 1 : 0, rho_rf, gradient_on() ? 1 : 0, force_only() ? 1 : 0});
+                                                use_p_extra ? 1 : 0, rho_rf, gradient_on() ? 1 : 0, force_only() ? 1 : 0, pex_kappa()});
     count_fail();
   }
 

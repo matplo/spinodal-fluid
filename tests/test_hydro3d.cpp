@@ -657,3 +657,26 @@ TEST_CASE("Gaussian blob expanding into vacuum: no primitive-recovery failures a
   CHECK(h.n_recover_fail_total == 0);
   CHECK(excess <= kRecover3MaTol);
 }
+
+// Floor on the extra pressure in recover_core (gradient.pex_floor_kappa). A cell close to the E = |M| limiter surface with a negative
+// extra pressure has g(1) = E - |M| + p0(E - |M|, 0) + p_extra < 0, i.e. no root: flagged without the floor, recovered with it.
+TEST_CASE("recover_core: floor on a negative extra pressure near the limiter surface") {
+  const TestEosIdeal eos{};
+  const Real E = 0.02, Ma = E * (1.0 - 1e-3), R = 1e-3, pex = -0.01 * E;
+  Real e1, r1, c1, p1;
+  const int f_off = recover_core(eos, R, Ma, E, 1e-12, pex, e1, r1, c1, p1);
+  CHECK(f_off == 1);
+  const Real kappa = 0.5;
+  const int f_on = recover_core(eos, R, Ma, E, 1e-12, pex, e1, r1, c1, p1, kappa);
+  CHECK(f_on == 2);  // recovered (bit 0 clear), floor acted (bit 1)
+  CHECK(c1 > 0.0); CHECK(c1 < 1.0);
+  CHECK(Ma / (E + p1) == doctest::Approx(c1).epsilon(1e-10));  // v = |M| / (E + p) with the floored pressure
+  const Real e0 = E - Ma, pfloor = -kappa * (e0 + eos.p0(e0, 0.0));
+  CHECK(p1 - eos.p0(e1, r1) == doctest::Approx(pfloor).epsilon(1e-12));
+  std::printf("[FIX] recover_core floor: no floor -> flag %d; kappa 0.5 -> flag %d, v = %.12f, p_extra used %.6e (input %.6e) GeV/fm^3\n", f_off, f_on,
+              c1, p1 - eos.p0(e1, r1), pex);
+  // A cell with a root keeps its p_extra untouched.
+  const int f_ok = recover_core(eos, R, 0.5 * E, E, 1e-12, pex, e1, r1, c1, p1, kappa);
+  CHECK(f_ok == 0);
+  CHECK(p1 - eos.p0(e1, r1) == doctest::Approx(pex).epsilon(1e-12));
+}
