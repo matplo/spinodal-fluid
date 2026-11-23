@@ -1,0 +1,6 @@
+{
+  "run": {
+    "stop_at_fluid_end": false,
+    "t_max_after_init_fm": 6.0
+  }
+}

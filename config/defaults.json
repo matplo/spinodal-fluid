@@ -6,7 +6,15 @@
   },
   "run": {
     "backend": "auto",
-    "precision": "double"
+    "precision": "double",
+    "t_max_after_init_fm": 6.0,
+    "stop_at_fluid_end": true,
+    "max_recovery_failures": 0,
+    "event_first": 0,
+    "n_events": 1,
+    "resume": true,
+    "retry_failed": false,
+    "marginals": true
   },
   "output": {
     "dir": "out",
@@ -17,7 +25,10 @@
     "nx": 64,
     "ny": 64,
     "nz": 64,
-    "boundary": "periodic"
+    "boundary": "periodic",
+    "Lx_fm": 0.0,
+    "Ly_fm": 0.0,
+    "Lz_fm": 0.0
   },
   "shasta": {
     "antidiffusion": "phoenical",
