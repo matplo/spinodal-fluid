@@ -28,7 +28,7 @@ been measured so far.
 | WP3 | 3+1D solver, GPU validation | implemented, see `docs/validation.md` (WP3 and WP3g) |
 | WP4 | finite-range term, spinodal growth rates | implemented, see `docs/validation.md` (WP4); several comparisons with the continuum formulae at 8 to 10 cells per wavelength are reported as expected failures |
 | WP5 | initial conditions: OSCAR2013 reader, Gaussian deposition, SMASH driver, `spf_ic` | implemented, see `docs/initial_state.md` and `docs/validation.md` (WP5); evolution with the default `paper_pressure` term fails the recovery in the dilute fringe (reported in T5.4) |
-| WP7 | collision runs | not started |
+| WP7 | collision runs: `spf_collide`, batch tools, Stage A (3 A GeV, 20 events, dx = 0.2 fm) | Stage A done, see `docs/running_collisions.md` and `docs/validation.md` (WP7 Stage A); Stage B pending |
 | WP6 | observables (moments, clumps, U_perp, phase plane), `spf_observe`, ensemble script | implemented, see `docs/validation.md` and `docs/observables.md` |
 | WP8 | linear-response library (dispersion relation, transport coefficients, G_k, Lalime), `spf_linear`, digitised Figs. 2-7 of arXiv:1007.1448 | implemented, see `docs/validation.md` (WP8); nuclear-EoS provider pending (WP2b) |
 
@@ -44,6 +44,10 @@ ctest --preset cpu-openmp
 ./build/cpu-openmp/spf_info        # prints version, backend, and runs a reduction
 ```
 
+## Running collisions
+
+Step-by-step instructions (build, EoS tables with checksums, SMASH events, `spf_collide`, resume, box and dx, output files, aggregation, cost, troubleshooting): `docs/running_collisions.md`.
+
 ## Configuration
 
 Every modelling choice is a named key in `config/defaults.json`; `docs/decisions_spinodal.md` lists the alternatives.
@@ -58,7 +62,8 @@ apps               executables
 tests              doctest unit and regression tests
 tools/digitise_1007_1448.py, tools/data   digitiser for the figures of arXiv:1007.1448 (vector paths of the PDF) and its CSV output
 tools/eos          Python reference for the two-phase equation of state, its reference numbers, and the EoS table writer
-config             default configuration
+config             default configuration; config/collisions: collision-run configurations (box in fm per energy)
+tools/collisions   event generation, batch runs, aggregation, plots; tools/digitise_wp7.py: digitised Figs. of arXiv:1209.2462 and 1302.2956
 docs               plan, decisions, validation log
 ```
 

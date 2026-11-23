@@ -25,6 +25,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker
 
 NS = range(2, 8)
 COL = {2: "k", 3: "tab:green", 4: "tab:blue", 5: "tab:purple", 6: "tab:pink", 7: "tab:red"}
@@ -76,6 +77,19 @@ def clump_hist(d, t_target):
     return tot, times
 
 
+def clump_hist_window(d, t_lo, t_hi):
+    """histogram summed over the events and over all clump records with t_lo <= t <= t_hi (more clumps than at a single time)"""
+    tot, nrec = None, 0
+    for n, _ in events(d):
+        for f in glob.glob(os.path.join(d, n, "clumps_step*.json")):
+            j = json.load(open(f))
+            if t_lo - 1e-9 <= j["time_fm"] <= t_hi + 1e-9:
+                h = np.array(j["histogram"] + [j["overflow"]], float)
+                tot = h if tot is None else tot + h
+                nrec += 1
+    return tot, nrec
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--agg", required=True)
@@ -85,11 +99,15 @@ def main():
     ap.add_argument("--tag", default="stage")
     ap.add_argument("--paper", default="")
     ap.add_argument("--title", default="")
+    ap.add_argument("--runs-root", default="", help="directory that holds the run directories (when the aggregation ran elsewhere: provenance holds the original paths)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     prov = {k: json.load(open(os.path.join(a.agg, k, "provenance.json"))) for k in (a.tp, a.mx)}
     ens = {k: read_csv(os.path.join(a.agg, k, "ensemble_enhancement.csv")) for k in (a.tp, a.mx)}
     summ = {k: json.load(open(os.path.join(a.agg, k, "ensemble_summary.json"))) for k in (a.tp, a.mx)}
+    if a.runs_root:
+        for k in prov:
+            prov[k]["directory"] = os.path.join(a.runs_root, os.path.basename(prov[k]["directory"].rstrip("/")))
     num = {"tag": a.tag}
 
     # ---- moments
@@ -131,6 +149,9 @@ def main():
         ax.set_xlabel("per-event maximum enhancement, N=%d" % n)
         ax.set_ylabel("events")
         ax.legend(fontsize=7)
+    for ax in axs:
+        ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
     footer(fig, prov[a.tp])
     fig.savefig(os.path.join(a.out, a.tag + "_maxdist.png"), dpi=150)
     plt.close(fig)
@@ -165,7 +186,7 @@ def main():
     htp, ttp = clump_hist(prov[a.tp]["directory"], t_star)
     hmx, tmx = clump_hist(prov[a.mx]["directory"], t_star)
     if htp is not None and hmx is not None:
-        ptp, pmx = htp / htp.sum(), hmx / hmx.sum()
+        ptp, pmx = htp / max(htp.sum(), 1.0), hmx / max(hmx.sum(), 1.0)  # an ensemble without clumps has probability 0 in every bin
         diff = ptp - pmx
         k = np.arange(len(ptp) - 1)
         fig, ax = plt.subplots(figsize=(6, 4.2))
@@ -180,6 +201,17 @@ def main():
                 keep = (p[:, 0] - bx > 0.15) & (p[:, 0] - bx < 0.85)
                 pb = {int(b): float(np.median(p[(bx == b) & keep, 1])) for b in np.unique(bx) if np.any((bx == b) & keep)}
                 ax.plot([b + 0.5 for b in pb], list(pb.values()), "s", mfc="none", color="tab:green", label="arXiv:1302.2956 Fig. 7 (difference; bin [k,k+1) at k+0.5)")
+        # pooled over the records within +-1 fm of t_star (more clumps, same quantity)
+        wtp, ntp = clump_hist_window(prov[a.tp]["directory"], t_star - 1.0, t_star + 1.0)
+        wmx, nmx = clump_hist_window(prov[a.mx]["directory"], t_star - 1.0, t_star + 1.0)
+        if wtp is not None and wmx is not None and (wtp.sum() > 0 or wmx.sum() > 0):
+            wd = wtp / max(wtp.sum(), 1.0) - wmx / max(wmx.sum(), 1.0)
+            posw = wd[:-1] > 0
+            ax.plot(k[posw], wd[:-1][posw], "^--", color="gray", ms=3, label="same, pooled over t* $\\pm$ 1 fm (%d + %d clumps)" % (wtp.sum(), wmx.sum()))
+            num["clumps_pooled_window"] = {"window_fm": [t_star - 1.0, t_star + 1.0], "n_clumps_tp": float(wtp.sum()), "n_clumps_mx": float(wmx.sum()),
+                                           "difference_by_bin": [float(x) for x in wd[:-1]], "difference_peak_baryon_number": int(np.argmax(wd[:-1])),
+                                           "difference_peak_value": float(wd[:-1].max()), "p_two_phase": [float(x) for x in wtp / max(wtp.sum(), 1.0)],
+                                           "p_maxwell": [float(x) for x in wmx / max(wmx.sum(), 1.0)]}
         ax.set_yscale("log")
         ax.set_ylim(1e-4, 1)
         ax.set_xlabel("baryon number in clump (round(B))")

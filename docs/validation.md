@@ -894,3 +894,79 @@ CPU (`cpu-serial`, after merging origin/main at db0519e): `ctest` 2/2 passed; `s
 
 GPU node (NVIDIA TITAN RTX, Release `cuda-turing75`, Ninja, CUDA 12.9, GCC 13.4), commit 1f3dd79ab0e21bd61744b899b8969b8a30942802 (the head before this paragraph, which only adds this text) built from a fresh clone: `ctest` 2/2 passed (58.4 s);
 `spf_tests`: 89 test cases (89 passed, 0 failed), 20994 assertions, 20985 passed, 9 failed (the same expected failures as on the CPU: 89 / 20994 / 20985 / 9); `spf_tests -tc="T2b*"`: 2 test cases, 13 assertions, all passed, max relative deviation of the ten lattice values 0.000e+00 (tolerance 1e-10), v_s^2 -0.290994 (spinodal), 0.092142 (outside), 0.021074 (Maxwell), identical to the CPU values.
+
+## WP7 - collision runs, Stage A (2026-11-23)
+
+Code: `apps/spf_collide.cpp`, `include/spf/config.hpp` (`grid_cells`), `config/collisions/*.json`, `tools/collisions/*.py`, `tools/digitise_wp7.py`; instructions: `docs/running_collisions.md`.
+Stage A: 3 A GeV, central Pb+Pb, the same 20 SMASH events (seed 1, 3.4.2, cascade, `R = 1.2 A^(1/3)` fm, t_init = 11.2569 fm/c) for every equation of state, dx = 0.2 fm, box 38 x 38 x 34 fm (190 x 190 x 170 cells), outflow boundaries,
+`paper_pressure` with a = 0.033 fm, floor on (kappa = 0.5), sigma_init = 1 fm, 6 fm/c after t_init (75 steps), no stop at the fluid end (`stage_a.json`), vacuum threshold `shasta.e_vac_GeV_fm3 = 1e-8` (see T7.10). GPU: NVIDIA TITAN RTX, Release `cuda-turing75`, commit 39c9c74 (the code of the head of this branch; later commits add documentation and plotting tools only).
+The finite-T tables were taken from the archive of WP2b; SHA-256 of the `.bin` files measured on the GPU node and on the development machine: two-phase `3702ebde72cd7071552549af6bbe69a84afd10841335552d1cf0cc32284a78bc`, Maxwell `ed86c63c2b3ca061730de4516f23a66e7dd30eb1ecccb770e54adb44a38aa52a` (both equal to the values of the WP2b section).
+
+### Unit tests (`tests/test_collide.cpp`, 4 test cases, 65 assertions, all passed on each backend)
+
+| test | measured | tolerance | result |
+|---|---|---|---|
+| T7.1 box and dx keys: cells follow box / dx | 40 x 40 x 48 fm: dx = 0.2 -> 200 x 200 x 240; dx = 0.1 -> 400 x 400 x 480; dx = 0.25 -> 160 x 160 x 192; dx = 0.3 and dx < 0 throw | exact | pass (CPU and GPU) |
+| T7.2 driver on a Glauber-Gaussians state, 24 fm cube, dx = 0.4 fm, 4 fm/c: runs to the end time with 0 recovery failures; all summary fields present; resume skips the finished event | OpenMP: 25 steps, 0 failures, floor activations 170361, baryon leaving 1.764e-05, energy leaving 2.117e-05, 1.03 s; Serial: 0 failures, 170358, same losses, 3.85 s; Cuda: 0 failures, 170366, same losses, 0.28 s | failures = 0; losses < 1e-4; steps = 25 | pass (OpenMP, Serial, Cuda) |
+| T7.3 only `grid.dx_fm` changes (0.4 -> 0.8 fm, box 24 fm): cells per side | 60 and 30, box 24.0 fm in both, 0 failures | exact | pass |
+| T7.4 stop on failure: `gradient.pex_floor_kappa = -1`, threshold 0 / 1e8 | threshold 0: status `recovery_failure` after 1 step with 1538 (OpenMP), 1540 (Serial), 1539 (Cuda) failures, exit code 3; threshold 1e8: status `t_max`, 25 steps, 95916 (OpenMP), 95800 (Serial), 95712 (Cuda) failures reported | status and exit code | pass |
+
+Full suites: CPU (`cpu-openmp`, 16 threads): `ctest` 2/2 passed (525.5 s), `spf_tests` 93 test cases (93 passed, 0 failed), 21059 assertions, 21050 passed, 9 failed (the failed assertions are those of the expected-failure test cases of other packages; before this package 89 cases, 20994 assertions, 20985 passed, 9 failed). `cpu-serial`: `ctest` 2/2 passed (299.9 s), `spf_tests` 93 / 93 passed, 21059 assertions, 21050 passed, 9 failed.
+GPU node (TITAN RTX, Release `cuda-turing75`, fresh clone of commit 39c9c74): `spf_tests` 93 test cases (93 passed, 0 failed), 21059 assertions, 21050 passed, 9 failed (the same expected failures); `ctest` 2/2 passed (59.8 s) in the first GPU job (head ec3b4a1, same test sources).
+
+### Stage A results (20 events per equation of state, GPU)
+
+| quantity | cold-thermal two-phase | cold-thermal Maxwell | table two-phase | table Maxwell |
+|---|---|---|---|---|
+| T7.5 recovery failures (sum over 20 events, initial state + run) | 0 | 0 | 0 | 0 |
+| failed events | 0 | 0 | 0 | 0 |
+| floor activations (cells, summed over sweeps; mean per event) | 1.499e7 (7.50e5) | 1.499e7 (7.49e5) | 2.112e7 (1.056e6) | 2.112e7 (1.056e6) |
+| limiter cells in the run (sum) | 2.795e7 | 2.794e7 | 3.037e7 | 3.037e7 |
+| T7.6 baryon number leaving the box, max / mean over events | 1.007e-05 / 6.97e-07 | 1.007e-05 / 6.97e-07 | 1.062e-05 / 9.05e-07 | 1.062e-05 / 9.05e-07 |
+| energy leaving the box, max / mean | 4.57e-05 / 7.75e-06 | 4.57e-05 / 7.75e-06 | 4.25e-05 / 6.96e-06 | 4.25e-05 / 6.96e-06 |
+| wall per event (mean) / per step | 12.04 s / 0.1152 s | 12.29 s / 0.1181 s | 25.34 s / 0.2637 s | 25.30 s / 0.2637 s |
+| fluid end (all cells eps < 5 eps_s), mean over events, 20 of 20 reached | 2.12 fm | 2.07 fm | 2.98 fm | 2.91 fm |
+| maximum of the mean enhancement N = 7 (time) | 9.47 (1.60 fm) | 1.31 (1.04 fm) | 3.02 (1.68 fm) | 1.07 (0.56 fm) |
+| N = 5 | 1.96 (1.52 fm) | 1.07 (0.64 fm) | 1.19 (1.60 fm) | 1.03 (0.40 fm) |
+| T7.7 per-event maximum enhancement, N = 7: mean +- s.e. (s.d.; max / mean; max / min) | 10.66 +- 2.95 (13.21; 4.20; 44.5) | 1.48 +- 0.13 (0.58; 2.16; 3.17) | 3.38 +- 0.90 (4.01; 4.21; 14.2) | 1.10 +- 0.03 (0.11; 1.29; 1.42) |
+| N = 5 | 2.20 +- 0.39 (1.73; 3.02; 6.6) | 1.11 +- 0.03 (0.14; 1.36; 1.50) | 1.34 +- 0.13 (0.60; 2.31; 3.09) | 1.04 +- 0.01 (0.04; 1.12; 1.17) |
+| two-phase / Maxwell of the mean per-event maximum, N = 7 / N = 5 | 7.20 / 1.98 | | 3.08 / 1.29 | |
+
+Baryon fraction with v_s^2 < 0 (the isentropic spinodal of the EoS in use; in the table runs that of the table, which closes at about 112 MeV, WP2b), mean over the events: two-phase 0.0387 (cold-thermal) and 0.0398 (table) at t_init, falling to about 0.021 at 1.5 fm/c; Maxwell partners 0.0173 and 0.0187 at t_init (cells with v_s^2 < 0 outside the first-order region), rising to 0.022 and 0.028 at 6 fm/c (figures `stageA_*_unstable.png` in the artifacts).
+Raw (not initial-state-normalised) moments: initial N = 2 ... 7 (same for all EoS): 1.58, 3.08, 6.80, 16.4, 42.0, 113; digitised arXiv:1209.2462 Fig. 3 at t = 0: 1.47, 2.61, 5.16, 11.0, 24.9, 59.1. The initial state (SMASH, 20 events) is more clumpy than the paper's by a factor 1.1 (N = 2) to 1.9 (N = 7).
+
+### Comparison with the targets of the plan (qualitative; nothing was tuned)
+
+| target | measured | met |
+|---|---|---|
+| T7.8 two-phase N = 7 mean enhancement exceeds Maxwell by more than a factor 3 at 3 A GeV | ratio of the means of the per-event maxima 7.20 (cold-thermal), 3.08 (table); ratio of the maxima of the mean curves 7.2 and 2.8 | met by the ratio of the per-event maxima (table: marginally, the s.e. of the two-phase mean is 27 %); the ratio of the maxima of the mean curves is 2.8 for the table (not met by that definition) |
+| paper: two-phase mean max enhancement 15.3 (N = 7), 2.75 (N = 5) at 3 A GeV, Maxwell 1.52, 1.12 (digitised Fig. 4) | cold-thermal 10.7, 2.20 (Maxwell 1.48, 1.11); table 3.38, 1.34 (Maxwell 1.10, 1.04) | cold-thermal two-phase 0.70 of the paper (N = 7); table 0.22; reported, not judged |
+| time of the maximum of the mean curve (paper 3.0 fm, Fig. 5 of arXiv:1302.2956) | 1.6 fm (cold), 1.7 fm (table): the amplification is earlier and shorter than in the paper | not met (reported) |
+| T7.9 clump-size difference two-phase minus Maxwell peaks at 5 - 8 baryons (Fig. 7), rho_min = 7 rho_s | at the record nearest to the N = 7 maximum (1.52 fm): cold 17 two-phase and 4 Maxwell clumps in 20 events, the positive difference is in bins 1 - 4 (peak at B = 1, 0.10); pooled over t* +- 1 fm: 43 and 8 clumps, peak at B = 1 (0.22); table: 11 and 0 clumps (pooled 32 and 0), peak at B = 1 | not met / not testable: too few clumps above 7 rho_s (0.9 per event) and none larger than 4 baryons |
+| mean maximum versus E_lab (peak 2 - 4 A GeV, flat for Maxwell) | Stage B (one energy only in Stage A) | not tested |
+
+### T7.10 vacuum threshold (decision S20)
+
+Event 0 of the 3 A GeV file, table two-phase, CPU, 13 steps (1 fm/c): recovery failures 1241 at `shasta.e_vac_GeV_fm3 = 1e-12`, 294 at 1e-11, 64 at 1e-10, 0 at 1e-9, 0 at 1e-7, 0 at 1e-5. Over the full 75 steps: 2 failures at 1e-9, 0 at 1e-8. Failing cells after the first step at 1e-12 (`spf_ic --evolve`): 1642 cells, E = 7e-12 ... 5e-5 eps_s, R = 1e-12 ... 1e-5 rho_s, |M|/E = 0.82 ... 1.0, radius 8.6 - 15.2 fm, together 7.7e-7 baryons and 2.3e-6 GeV;
+the cold-thermal EoS has no failures at 1e-12 (box study, 24 events). The collision configurations use 1e-8 (the threshold removes less than 1e-6 of the baryon number and energy: over 13 steps the total loss, outflow included, is 1.7e-07 / 2.5e-07 at 1e-7 and 2.2e-09 / 1.4e-09 at 1e-9). This is a change of a numerical vacuum threshold, not of a tolerance or reference value; it is reported as a deviation.
+
+### T7.11 dx demonstration (event 0, 3 A GeV, table two-phase, same box 38 x 38 x 34 fm, only `grid.dx_fm` changed; GPU)
+
+| dx | cells | steps | wall | per step | observables | GPU memory | host memory | recovery failures | floor activations | max enhancement N = 4, 5, 6, 7 | fluid end |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.2 fm | 190 x 190 x 170 = 6.137e6 | 75 | 24.8 s | 0.258 s | 5.0 s | 2042 MiB | 327 MB | 0 | 814212 | 1.07, 1.42, 2.35, 4.40 | 4.88 fm |
+| 0.1 fm | 380 x 380 x 340 = 4.910e7 | 150 | 329.3 s | 1.805 s | 55.5 s | 14184 MiB | 1742 MB | 0 | 4377190 | 1.25, 2.02, 4.11, 9.24 | 5.04 fm |
+
+The moment curves differ (N = 7 maximum 4.40 at 0.2 fm, 9.24 at 0.1 fm for this event); the change is reported, not judged. One event only.
+
+### T7.12 CPU cost (one event, table two-phase, `cpu-openmp`, 16 threads, macOS arm64)
+
+68.5 s per event (stepping 54.3 s = 0.724 s per step, observables 13.9 s), 0 failures (event 0, `e_vac = 1e-8`); the GPU needs 24.8 s for the same event.
+
+### T7.13 box study (cold-thermal, 4 events per energy, generous box 50 x 50 x 64 fm; `tools/data/box_study_cold_thermal_4events.json`)
+
+Smallest boxes with an outside baryon fraction (start and end, union bound) below 1e-4: 1 A GeV 40 x 40 x 34 fm (1.6e-5), 2: 36 x 36 x 30 (6.8e-5), 3: 34 x 34 x 30 (4.0e-5), 4: 34 x 34 x 28 (5.0e-5), 5: 34 x 34 x 26 (6.8e-5), 6: 34 x 34 x 26 (1.9e-5); chosen boxes (+2 fm on each half-width) in `docs/running_collisions.md`, Sect. 6. Measured in the production runs: Stage A baryon leaving at most 1.06e-05 (< 1e-4 in every event); the other energies are not run in Stage A.
+
+### Deviations from the brief
+
+The Stage A runs use `shasta.e_vac_GeV_fm3 = 1e-8` instead of the library default 1e-12 (T7.10); `run.stop_at_fluid_end = false` in Stage A (the fluid end is recorded); the CPU cost was measured on the development machine (16 threads), not on the GPU node; the box study has 4 events per energy; the clump comparison has too few clumps for a statement about the position of the difference peak.
