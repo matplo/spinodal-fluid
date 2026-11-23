@@ -39,9 +39,11 @@ def main():
     ev = set()
     with open(a.oscar) as f:
         for line in f:
-            if line.startswith("# event") and " out " in line and "start" in line:
+            if line.startswith("# event") and " out " in line:
                 ev.add(line.split()[2])
     nfile = len(ev)
+    if nfile == 0:
+        sys.exit("no event blocks ('# event N ... out M') found in " + a.oscar)
     last = nfile if a.n < 0 else min(nfile, a.first + a.n)
     os.makedirs(a.out, exist_ok=True)
     chunk = a.chunk if a.chunk > 0 else max(1, last - a.first)

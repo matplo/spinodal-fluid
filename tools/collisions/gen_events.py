@@ -19,7 +19,7 @@ def count_events(path):
     ev = set()
     with open(path) as f:
         for line in f:
-            if line.startswith("# event") and " out " in line and "start" in line:
+            if line.startswith("# event") and " out " in line:
                 ev.add(line.split()[2])
     return len(ev)
 
