@@ -141,6 +141,40 @@ struct HostState {
 //   eps in [1, 2] GeV/fm^3, rho in [0.2, 0.4] fm^-3, |v| <= 0.3, p = eps/3 compatible.
 HostState smooth_random_state(int nx, int ny, int nz, std::uint64_t seed = 12345, int n_modes = 6);
 
+// Optional per-state diagnostics of the cells (Hydro3D::diagnose_cells, driver key run.cell_diagnostics): cells in which the floor on the extra
+// pressure acted (flag bit 1 of the last recovery), cells whose recovery failed (bit 0), and the energy E = T^00 and baryon number R = N^0 they hold;
+// sums are over cells (multiply by dx^3 for the integrals). n_vac counts the cells that hold something (E != 0 or R != 0) with E < e_vac.
+struct CellDiag {
+  long n_floor = 0, n_fail = 0, n_vac = 0;
+  Real E_floor = 0, R_floor = 0, E_vac = 0, R_vac = 0, E_tot = 0, R_tot = 0;
+  KOKKOS_INLINE_FUNCTION CellDiag& operator+=(const CellDiag& o) {
+    n_floor += o.n_floor; n_fail += o.n_fail; n_vac += o.n_vac;
+    E_floor += o.E_floor; R_floor += o.R_floor; E_vac += o.E_vac; R_vac += o.R_vac; E_tot += o.E_tot; R_tot += o.R_tot;
+    return *this;
+  }
+};
+// Energy and baryon number (sums over cells) that the vacuum cut E < e_vac removes, and the number of cells it empties.
+struct VacSums {
+  long n = 0;
+  Real E = 0, R = 0;
+  KOKKOS_INLINE_FUNCTION VacSums& operator+=(const VacSums& o) { n += o.n; E += o.E; R += o.R; return *this; }
+};
+
+}  // namespace spf
+
+namespace Kokkos {
+template <>
+struct reduction_identity<spf::CellDiag> {
+  KOKKOS_FORCEINLINE_FUNCTION static spf::CellDiag sum() { return spf::CellDiag(); }
+};
+template <>
+struct reduction_identity<spf::VacSums> {
+  KOKKOS_FORCEINLINE_FUNCTION static spf::VacSums sum() { return spf::VacSums(); }
+};
+}  // namespace Kokkos
+
+namespace spf {
+
 namespace detail {
 
 template <class EoS>
@@ -231,6 +265,29 @@ struct CountFloor3K {
   KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, long& acc) const { acc += (fail(i, j, k) >> 1) & 1; }
 };
 
+struct CellDiagK {
+  Kokkos::View<int***> fail;
+  Field3 R, E;
+  Real e_vac;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, CellDiag& a) const {
+    const int f = fail(i, j, k);
+    const Real e = E(i, j, k), r = R(i, j, k);
+    a.E_tot += e; a.R_tot += r;
+    if (f & 1) a.n_fail += 1;
+    if (f & 2) { a.n_floor += 1; a.E_floor += e; a.R_floor += r; }
+    if (e < e_vac && (e != 0.0 || r != 0.0)) { a.n_vac += 1; a.E_vac += e; a.R_vac += r; }
+  }
+};
+
+struct VacRemovedK {
+  Field3 R, E;
+  Real e_vac;
+  KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k, VacSums& a) const {
+    const Real e = E(i, j, k), r = R(i, j, k);
+    if (e < e_vac && (e != 0.0 || r != 0.0)) { a.n += 1; a.E += e; a.R += r; }
+  }
+};
+
 struct Enforce3K {
   Field3 R, Mx, My, Mz, E;
   Real e_vac;
@@ -281,6 +338,11 @@ class Hydro3D {
   Field3 eps, rho, vx, vy, vz, p_out;  // primitives of the last update_primitives() (allocated on first use)
   long n_clamped_total = 0, n_recover_fail_total = 0, steps = 0;
   long n_pex_floor_total = 0;  // recovered cells in which the floor on p_extra acted (gradient.pex_floor_kappa), summed
+  // Optional diagnostic (default off): energy and baryon number (integrals, GeV and number) removed by the vacuum cut E < prm.e_vac from the
+  // state at the end of each sweep, summed over the run, and the number of cells emptied.
+  bool track_vacuum = false;
+  Real vac_removed_E = 0.0, vac_removed_R = 0.0;
+  long vac_removed_cells = 0;
   Real time = 0.0;
 
   Hydro3D(const EoS& eos_, const Hydro3DParams& hp)
@@ -399,6 +461,18 @@ class Hydro3D {
     t.Mz = field_sum(grid, U[3]);
     t.E = field_sum(grid, U[4]);
     return t;
+  }
+
+  // Diagnostic of the current state: runs update_primitives() (the counters n_recover_fail_total and n_pex_floor_total are restored) and reduces the
+  // floor / failure flags of that recovery together with E and R over the interior. Sums over cells.
+  CellDiag diagnose_cells() {
+    const long nf = n_recover_fail_total, nfl = n_pex_floor_total;
+    update_primitives();
+    n_recover_fail_total = nf;
+    n_pex_floor_total = nfl;
+    CellDiag d;
+    Kokkos::parallel_reduce("hydro3d_cell_diag", interior_policy(grid), detail::CellDiagK{fail_, U[0], U[4], prm.e_vac}, d);
+    return d;
   }
 
   long count_E_lt_M() const {
@@ -566,7 +640,13 @@ class Hydro3D {
     fill_dir_one(p_extra, dir);
   }
 
-  void enforce(Field3* Q) {
+  void enforce(Field3* Q, bool final_state = false) {
+    if (track_vacuum && final_state) {
+      VacSums v;
+      Kokkos::parallel_reduce("hydro3d_vacuum_removed", interior_policy(grid), detail::VacRemovedK{Q[0], Q[4], prm.e_vac}, v);
+      const Real dV = grid.dx * grid.dx * grid.dx;
+      vac_removed_E += v.E * dV; vac_removed_R += v.R * dV; vac_removed_cells += v.n;
+    }
     long nc = 0;
     Kokkos::parallel_reduce("hydro3d_enforce", interior_policy(grid), detail::Enforce3K{Q[0], Q[1], Q[2], Q[3], Q[4], prm.e_vac}, nc);
     n_clamped_total += nc;
@@ -588,7 +668,7 @@ class Hydro3D {
       recover_dir(Uh, dir);
     }
     for (int c = 0; c < 5; ++c) shasta_step(grid, dir, lam, prm, U[c], vd_, *f[c], Un[c], work_);
-    enforce(Un);
+    enforce(Un, true);
     for (int c = 0; c < 5; ++c) {
       Field3 t = U[c]; U[c] = Un[c]; Un[c] = t;
     }

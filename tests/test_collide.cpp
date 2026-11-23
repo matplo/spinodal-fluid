@@ -140,3 +140,38 @@ TEST_CASE("T7.4 driver: stops the event with status recovery_failure when the fa
   std::filesystem::remove_all(o1);
   std::filesystem::remove_all(o2);
 }
+
+TEST_CASE("T7.5 driver: optional cell diagnostics (floor share, vacuum cut), default off") {
+  const std::string o0 = scratch("diag_off"), o1 = scratch("diag_on");
+  REQUIRE(run_driver(o0, "run.t_max_after_init_fm=2.0", "0.4") == 0);
+  CHECK(!std::filesystem::exists(o0 + "/event_000/cell_diagnostics.csv"));
+  CHECK(!read_json(o0 + "/event_000/summary.json").contains("cell_diagnostics"));
+  REQUIRE(run_driver(o1, "run.t_max_after_init_fm=2.0 run.cell_diagnostics=true", "0.4") == 0);
+  const auto j = read_json(o1 + "/event_000/summary.json");
+  REQUIRE(j.contains("cell_diagnostics"));
+  const auto& d = j.at("cell_diagnostics");
+  CHECK(d.at("max_floor_cells").get<double>() > 0.0);  // the floor acts in the dilute fringe
+  const double ef = d.at("max_E_floor_fraction").get<double>(), rf = d.at("max_R_floor_fraction").get<double>();
+  CHECK(ef >= 0.0);
+  CHECK(ef < 1e-2);
+  CHECK(rf >= 0.0);
+  CHECK(rf < 1e-2);
+  CHECK(d.at("vacuum_cut_removed_E_fraction_of_initial").get<double>() < 1e-6);
+  // one line per step plus the initial state
+  std::ifstream in(o1 + "/event_000/cell_diagnostics.csv");
+  long lines = 0;
+  std::string line;
+  while (std::getline(in, line)) ++lines;
+  CHECK(lines == j.at("steps").get<long>() + 2);  // header + steps + 1
+  // the recovery counters are not changed by the diagnostic: same failures and floor count as without it
+  CHECK(j.at("recovery_failures").get<long>() == 0);
+  printf("[T7.5] max floor cells %.0f, max floor share of energy %.3e and of baryon number %.3e, vacuum cut removed %.3e of the initial energy (%ld cell events); %ld CSV lines\n",
+         d.at("max_floor_cells").get<double>(), ef, rf, d.at("vacuum_cut_removed_E_fraction_of_initial").get<double>(),
+         d.at("vacuum_cut_removed_cells_total").get<long>(), lines);
+  const auto j0 = read_json(o0 + "/event_000/summary.json");
+  // the floor count differs between two runs by the summation order of the deposition (about 1e-4); a diagnostic that counted twice would change it by 100 %
+  const double fa0 = j0.at("floor_activations").get<double>(), fa1 = j.at("floor_activations").get<double>();
+  CHECK(std::fabs(fa1 - fa0) < 1e-2 * fa0);
+  std::filesystem::remove_all(o0);
+  std::filesystem::remove_all(o1);
+}

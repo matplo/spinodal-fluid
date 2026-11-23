@@ -14,7 +14,8 @@
     "n_events": 1,
     "resume": true,
     "retry_failed": false,
-    "marginals": true
+    "marginals": true,
+    "cell_diagnostics": false
   },
   "output": {
     "dir": "out",
