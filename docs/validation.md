@@ -1088,3 +1088,5 @@ Not tuned: no parameter was changed to approach the paper.
 ### Reproducing and extending
 
 The commands are in `docs/running_collisions.md`, Sect. 13 (`tools/collisions/stage_b.sh`). SMASH reproducibility for the extension: 200 events with seed 1 at 1 and 6 A GeV start with events that are identical to the 50 events of the pilot files (checked on the GPU node by comparing the event blocks), so the pilot directories can be extended in place.
+
+CPU / GPU check: event 0 at 3 A GeV (`cpu-openmp`, 16 threads, run through `stage_b.sh` as a test of the script) gives the N = 7 maxima 9.546131 (two-phase) and 1.413975 (Maxwell), equal to the GPU values of the pilot to the six digits shown.
