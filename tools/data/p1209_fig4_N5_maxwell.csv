@@ -1,0 +1,13 @@
+# source: arXiv:1209.2462 Fig. 4 (page 4), N = 5 panel; maxwell EoS (open markers, violet); mean maximum enhancement versus E_lab [A GeV]
+# axis fit rms (x, y; log10 units on log axes) = 0.000201, 5.82e-15
+E_lab_GeV,max_enhancement
+0.50003838,1.0080945
+1.0001197,1.0149566
+1.5002247,0.97724054
+1.9996818,0.98409912
+2.4997707,1.0686566
+2.9998602,1.1200915
+3.4999491,1.1806554
+4.0000385,1.2229053
+5.0002168,1.2046491
+5.9997789,1.0949487

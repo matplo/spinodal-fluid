@@ -1,0 +1,13 @@
+# source: arXiv:1302.2956 Fig. 6 (page 6), N = 2 (filled markers: red squares/circles/triangles for N = 2/5/7); two_phase EoS; mean maximum enhancement versus E_lab [A GeV]
+# axis fit rms (x, y; log10 units on log axes) = 0.000547, 7.85e-17
+E_lab_GeV,max_enhancement
+0.50057341,1.0017839
+1.0003057,1.0017839
+1.500038,0.95547006
+1.9997843,0.97668672
+2.4995166,0.95708856
+2.999262,0.9538543
+3.5010804,0.98166048
+4.0008131,0.97504583
+5.0002908,1.0000898
+5.9997563,1.0085799
