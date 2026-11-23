@@ -61,6 +61,7 @@ arguments. `config/collisions/` holds the files for collision runs:
 |---|---|
 | `common.json` | outflow boundaries, dx = 0.2 fm, bicubic table interpolation, `paper_pressure` gradient with a = 0.033 fm, sigma_init = 1 fm, `ic.max_outside_fraction = 1e-5`, vacuum threshold `shasta.e_vac_GeV_fm3 = 1e-8`, record every step, clump and phase histograms every 0.5 fm/c |
 | `e1.json` ... `e6.json` | `ic.e_lab_gev` and the box in fm (section 6) |
+| `t_init_fixed.json` | `ic.t_init_radius_mode = fixed`, `ic.t_init_radius_fm = 6.62`: start time t_init = 10.481 fm/c at 3 A GeV (the paper formula with the Woods-Saxon radius) instead of 11.257 fm/c for R = 1.2 A^(1/3) = 7.11 fm. SMASH events for it: `gen_events.py ... --extra --radius-mode fixed` (same seed). The start time changes the N = 7 enhancement by a factor 3 (`docs/validation.md`, WP7 G3, F1) |
 | `stage_a.json` | `run.stop_at_fluid_end = false`: events run the full 6 fm/c (the fluid end is recorded, not enforced), as needed for moment curves of equal length |
 
 Single event (CPU), then a batch over the 20 events of the file, resumable, on the GPU node:
@@ -105,6 +106,7 @@ interruption (an event that was interrupted has no summary and is run again from
 | `run.stop_at_fluid_end` | true | stop at the fluid end |
 | `run.max_recovery_failures` | 0 | stop the event when more primitive-recovery failures (cells, summed over all sweeps) occur |
 | `run.resume`, `run.retry_failed` | true, false | skip finished events / run failed ones again |
+| `run.cell_diagnostics` | false | write `cell_diagnostics.csv` (per step: cells in which the floor on the extra pressure acted and their share of the energy and baryon number; cells below the vacuum threshold; energy and baryon number removed by the vacuum cut) and the `cell_diagnostics` block of `summary.json`; costs one extra recovery per step (0.243 s against 0.258 s per step in the dx demonstration at 0.2 fm, within the event-to-event variation) |
 | `run.marginals` | true | write `marginals.json` (baryon number per slab at start and end; used by the box study) |
 | `shasta.e_vac_GeV_fm3` | 1e-12 (library), 1e-8 (collision files) | cells with energy density below this are treated as vacuum; see section 9 |
 | `obs.every_steps` | 1 | recording interval in steps (dt = 0.4 dx = 0.08 fm/c at dx = 0.2) |
@@ -142,7 +144,7 @@ same end time doubles when dx is halved):
 build/cuda-turing75/spf_collide ... grid.dx_fm=0.1          # 3 A GeV: 380 x 380 x 340 cells instead of 190 x 190 x 170
 ```
 
-The box lengths must be multiples of dx (else an error). Tests: `T7.1`, `T7.3` in `tests/test_collide.cpp`. Memory grows with the cell count (about 330 bytes per cell on the GPU, section 10); 0.1 fm at 3 A GeV needs 14.2 GB of the 24 GB card.
+The box lengths must be multiples of dx (else an error). Tests: `T7.1`, `T7.3` in `tests/test_collide.cpp`. Memory grows with the cell count (about 330 bytes per cell on the GPU, section 10); 0.1 fm at 3 A GeV needs 14.2 GB of the 24 GB card. Measured on five events (table, start time R = 6.62 fm): the two-phase N = 7 maximum is 1.2 - 2.1 times larger at 0.1 fm (mean 14.1 at 0.2 fm, 24.9 at 0.1 fm), the Maxwell one 1.04 - 1.36 times (1.60 and 1.92); 296 - 309 s per event against 25 s (`docs/validation.md`, WP7 G3, F2).
 
 ## 8. Output files
 
@@ -154,6 +156,7 @@ Per run directory: `config_used.json`, `run_index.json` (status per event of the
 | `observables.csv` | one line per step: `t_fm, A, mom2 ... mom7, U_perp, unstable_fraction, eps_max_eps_s, step` (`docs/observables.md`); `unstable_fraction` is the baryon fraction in cells with v_s^2 < 0 (the isentropic spinodal of the EoS in use) |
 | `observables_summary.json` | recorder summary (fluid end, maximum enhancement) |
 | `clumps_step<S>.json`, `phase_step<S>.json` | clump histogram and phase-plane histogram at the first record at or after each `obs.hist_times_fm` |
+| `cell_diagnostics.csv` | only with `run.cell_diagnostics = true`: `step, t_fm, n_floor_cells, n_failed_cells, E_floor_fraction, R_floor_fraction, n_vac_cells, E_vac_fraction, R_vac_fraction, vac_removed_cells_cumulative, vac_removed_E_fraction_cumulative, vac_removed_R_fraction_cumulative` (fractions of the energy / baryon number on the grid at that time, the cumulative ones of the initial values) |
 | `marginals.json` | baryon number per slab along x, y, z at start and end |
 | `config_used.json` | configuration echo of the event |
 
@@ -180,6 +183,7 @@ With the finite-temperature tables and the library default `shasta.e_vac_GeV_fm3
 Measured on event 0 of the 3 A GeV file (table two-phase, CPU, 13 steps): 1241 failures at 1e-12, 294 at 1e-11, 64 at 1e-10, 0 at 1e-9 (and 2 failures over the full 75 steps at 1e-9, 0 at 1e-8).
 The collision files therefore set `shasta.e_vac_GeV_fm3 = 1e-8` (7e-8 eps_s): cells below it are vacuum. The effect on the baryon number and energy is below 1e-6 of the totals
 (0.2 fm, 13 steps: baryon loss 2.2e-9 and energy loss 1.4e-9 at 1e-9; 1.7e-7 and 2.5e-7 at 1e-7). The same value is used for the cold-thermal runs, so that all four equations of state are treated alike.
+Complete measurement (5 events, 75 steps, `run.cell_diagnostics`; decision S22 and `docs/validation.md`, WP7 G3, F4): failures 102740 (1e-12), 15824 (1e-11), 1444 (1e-10), 5 (1e-9), 0 (1e-8); the per-event N = 7 maxima do not depend on the threshold; at 1e-8 the cut removes at most 1.3e-7 of the energy and 4.6e-7 of the baryon number over the run (20 events), and at t_init at most 1.2e-9 and 8.3e-10 are below the threshold.
 A run is never allowed to continue past a failure silently: with `run.max_recovery_failures = 0` the event stops with status `recovery_failure`.
 
 ## 11. Cost per event (3 A GeV, dx = 0.2 fm, 190 x 190 x 170 cells, 75 steps, observables every step, 13 clump and phase histograms)
