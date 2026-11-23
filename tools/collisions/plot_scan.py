@@ -41,6 +41,11 @@ def main():
                 if os.path.exists(f):
                     d = np.genfromtxt(f, delimiter=",", skip_header=3)
                     ax.plot(d[:, 0], d[:, 1], ls, marker="x", color="k", lw=0.8, label="arXiv:1209.2462 Fig. 4" if kind == "two_phase" else None)
+            for kind in ("two_phase", "maxwell"):
+                f = os.path.join(a.paper, "p1302_fig6_N%d_%s.csv" % (pn, kind))
+                if os.path.exists(f):
+                    d = np.genfromtxt(f, delimiter=",", skip_header=3)
+                    ax.plot(d[:, 0], d[:, 1], "--", marker="+", color="gray", lw=0.8, label="arXiv:1302.2956 Fig. 6" if kind == "two_phase" else None)
         ax.set_yscale("log")
         ax.set_xlabel(r"$E_{\rm lab}$ [A GeV]")
         ax.set_ylabel("mean maximum enhancement, %s" % n)
