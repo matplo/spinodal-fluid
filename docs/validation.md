@@ -1047,3 +1047,44 @@ The per-event maxima of N = 7 of the five events are the same for all thresholds
 ### Tests
 
 New: T7.5 (`run.cell_diagnostics`: CSV with one line per step plus the initial state, floor share below 1e-2, vacuum cut below 1e-6 of the energy, off by default, floor-activation count of the run unchanged to 1e-2): CPU OpenMP 82 assertions in the 5 WP7 test cases all passed; on the GPU `[T7.5] max floor cells 1736, max floor share of energy 3.556e-04 and of baryon number 3.720e-04, vacuum cut removed 1.840e-08 of the initial energy (76956 cell events); 15 CSV lines` (OpenMP: 1731 cells, 3.556e-04, 3.720e-04, 1.840e-08). Full suites at this head: CPU `cpu-openmp` `ctest` 2/2 passed (524.0 s), `cpu-serial` 2/2 passed (303.3 s); `spf_tests` 94 test cases (94 passed, 0 failed), 21076 assertions, 21067 passed, 9 failed (the expected failures of other packages: 93 / 21059 / 21050 / 9 before T7.5); GPU node (TITAN RTX, Release `cuda-turing75`, fresh clone of b270d43): `spf_tests` 94 test cases passed, 21076 assertions, 21067 passed, 9 failed (the same expected failures), the five WP7 test cases (`-tc="T7*"`): 82 assertions, all passed (T7.2 on Cuda: 25 steps, 0 failures; T7.4: 1539 and 95792 failures).
+
+## WP7 - Stage B pilot (2026-11-23)
+
+Scope (user decision): E_lab = 1, 2, 3, 4, 5, 6 A GeV; finite-T table two-phase and Maxwell (bicubic interpolation); 50 SMASH events per energy (seed 1, SMASH 3.4.2, cascade, the same events for both equations of state; output at the matching start time t_init = 2R / sqrt(gamma_cm^2 - 1) with R = 6.62 fm: 18.15, 12.84, 10.48, 9.08, 8.12, 7.41 fm/c); dx = 0.2 fm; the boxes of `config/collisions/e1.json ... e6.json` (44 x 44 x 38, 40 x 40 x 34, 38 x 38 x 34, 38 x 38 x 32, 38 x 38 x 30, 38 x 38 x 30 fm); `paper_pressure` a = 0.033 fm, floor on; `shasta.e_vac_GeV_fm3 = 1e-8`; outflow boundaries.
+Recording: every step for the full 6 fm/c after t_init (75 steps; `stage_a.json`: `run.stop_at_fluid_end = false`, as in Stage A), the fluid end (all cells below 5 eps_s) is recorded, not enforced. Cell diagnostics on for event 0 of the two-phase run at each energy only. Code: main at 4df20e8, Release `cuda-turing75` on the GPU node (TITAN RTX), tables with SHA-256 `3702ebde...` (two-phase) and `ed86c63c...` (Maxwell) as before. 600 events (6 energies x 2 EoS x 50): recovery failures 0, failed events 0. The 1 A GeV runs were produced by a first job that stopped after them because of an error in its own script; the later job continued from those directories (finished events skipped, which is the resume mechanism), so all 600 events come from the same code and configuration.
+
+### B1 - per energy and equation of state
+
+"per-event max" = mean over the 50 events of the maximum over time of the enhancement mom_N(t) / mom_N(t_init); "max of mean" = maximum of the event-averaged curve and its time after t_init; fluid end = mean over the events that reach it within 6 fm/c (number in brackets); leaving = the largest fraction over the 50 events of the initial baryon number / energy on the grid that left the box; wall = mean wall time per event on the GPU including initial state, observables and histograms (the same events for both EoS, so the leaving fractions are identical).
+
+| E_lab [A GeV] | EoS | events | failures | N=7 per-event max: mean +- s.e. (s.d.) | N=5 per-event max | N=7 max of mean (t [fm]) | N=5 max of mean (t) | fluid end [fm] (events reaching it) | max baryon / energy leaving | wall per event [s] |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | two_phase | 50 | 0 | 2.55 +- 1.09 (7.71) | 1.20 +- 0.14 (0.99) | 1.91 (1.36) | 1.01 (0.16) | 0.96 (50) | 2.0e-05 / 4.5e-04 | 31.4 |
+| 1 | maxwell | 50 | 0 | 1.08 +- 0.03 (0.24) | 1.02 +- 0.01 (0.04) | 1.03 (0.16) | 1.01 (0.16) | 1.13 (50) | 2.0e-05 / 4.5e-04 | 31.4 |
+| 2 | two_phase | 50 | 0 | 17.46 +- 3.34 (23.59) | 3.07 +- 0.42 (3.00) | 14.51 (1.68) | 2.67 (1.60) | 2.59 (50) | 1.7e-06 / 5.2e-05 | 26.1 |
+| 2 | maxwell | 50 | 0 | 1.92 +- 0.41 (2.87) | 1.18 +- 0.07 (0.52) | 1.31 (1.44) | 1.07 (0.72) | 2.47 (50) | 1.7e-06 / 5.2e-05 | 26.1 |
+| 3 | two_phase | 50 | 0 | 12.53 +- 1.91 (13.49) | 2.71 +- 0.27 (1.92) | 10.36 (1.92) | 2.46 (1.84) | 3.59 (50) | 8.5e-06 / 1.7e-04 | 23.8 |
+| 3 | maxwell | 50 | 0 | 1.42 +- 0.07 (0.52) | 1.13 +- 0.02 (0.14) | 1.29 (1.52) | 1.08 (0.96) | 3.51 (50) | 8.5e-06 / 1.7e-04 | 23.8 |
+| 4 | two_phase | 50 | 0 | 6.20 +- 0.95 (6.69) | 1.97 +- 0.15 (1.08) | 4.62 (2.56) | 1.71 (2.32) | 4.34 (49) | 5.3e-07 / 4.9e-05 | 22.7 |
+| 4 | maxwell | 50 | 0 | 1.79 +- 0.17 (1.18) | 1.25 +- 0.04 (0.30) | 1.43 (2.00) | 1.15 (1.36) | 4.39 (49) | 5.3e-07 / 4.9e-05 | 22.7 |
+| 5 | two_phase | 50 | 0 | 2.75 +- 0.36 (2.55) | 1.50 +- 0.08 (0.54) | 2.17 (3.92) | 1.31 (2.56) | 5.24 (43) | 1.0e-05 / 4.2e-05 | 21.9 |
+| 5 | maxwell | 50 | 0 | 2.13 +- 0.25 (1.74) | 1.37 +- 0.06 (0.42) | 1.83 (4.32) | 1.22 (4.08) | 5.25 (41) | 1.0e-05 / 4.2e-05 | 21.9 |
+| 6 | two_phase | 50 | 0 | 2.68 +- 0.40 (2.82) | 1.49 +- 0.08 (0.60) | 2.24 (4.96) | 1.32 (4.56) | 5.38 (26) | 1.2e-06 / 2.9e-05 | 21.6 |
+| 6 | maxwell | 50 | 0 | 2.14 +- 0.27 (1.90) | 1.37 +- 0.07 (0.47) | 1.81 (4.96) | 1.23 (4.64) | 5.47 (27) | 1.2e-06 / 2.9e-05 | 21.6 |
+
+The baryon number leaving the box is below 1e-4 in every event (largest 2.0e-05, at 1 A GeV); the energy leaving is larger at 1 A GeV (4.5e-04; the box study fixed only the baryon criterion). Ratio of the per-event maxima, two-phase over Maxwell, N = 7 (N = 5): 2.36 (1.17), 9.07 (2.59), 8.80 (2.40), 3.47 (1.57), 1.29 (1.10), 1.25 (1.09) for 1 ... 6 A GeV. Cell diagnostics, event 0 two-phase (floor cells at most; share of the energy / baryon number in floored cells at most; energy / baryon number removed by the vacuum cut over the run, fractions of the initial values): 1 A GeV 4104 cells, 4.7e-06 / 3.4e-06, 1.9e-07 / 4.6e-07; 2: 3138, 7.7e-05 / 3.9e-05, 1.5e-07 / 4.2e-07; 3: 2983, 7.7e-05 / 3.8e-05, 1.2e-07 / 2.2e-07; 4: 4060, 1.4e-04 / 6.4e-05, 1.1e-07 / 2.7e-07; 5: 3324, 2.3e-04 / 1.6e-04, 9.1e-08 / 3.6e-07; 6: 5206, 3.8e-04 / 1.5e-04, 8.3e-08 / 9.0e-08.
+Cost: 100 events per energy, mean wall per event 31.4, 26.1, 23.8, 22.7, 21.9, 21.6 s for 1 ... 6 A GeV (9.20e6, 6.80e6, 6.14e6, 5.78e6, 5.42e6, 5.42e6 cells, 75 steps); 14750 s (4.1 h) of GPU time for the pilot; the extension to 200 events per energy needs about 3 times that again (12 h).
+
+### B2 - figures
+
+`B_scan_enhancement_vs_E.png` (mean per-event maximum, N = 7 and 5, two-phase and Maxwell with standard errors, over the digitised Fig. 4 of arXiv:1209.2462 and Fig. 6 of arXiv:1302.2956), `B_moments_vs_energy.png` (enhancement N = 2 ... 7 versus t - t_init, one panel per energy), and per energy `B_e<E>_moments.png`, `_maxdist.png`, `_unstable.png`, `_clumps.png` (artifacts).
+
+### B3 - position of the maximum and the Maxwell curve (plan WP7 targets)
+
+Mean per-event maximum, two-phase, N = 7 (s.e.): 2.55 (1.09), 17.46 (3.34), 12.53 (1.91), 6.20 (0.95), 2.75 (0.36), 2.68 (0.40) for 1 ... 6 A GeV; N = 5: 1.20 (0.14), 3.07 (0.42), 2.71 (0.27), 1.97 (0.15), 1.50 (0.08), 1.49 (0.08). The largest value is at 2 A GeV for both N, inside the window 2 - 4 A GeV of the plan; the 2 and 3 A GeV values differ by 4.9 +- 3.8 (N = 7) and 0.36 +- 0.50 (N = 5) (standard errors added in quadrature), so the position of the maximum between 2 and 3 A GeV is not resolved with 50 events and a 1 A GeV grid. The maximum of the event-averaged curves is 14.5 at 2 A GeV and 10.4 at 3 A GeV (N = 7). The paper (digitised Fig. 4) has the maximum at 3 A GeV (N = 7: 1.03, 9.06, 15.28, 5.65, 2.37, 1.43; N = 5: 1.02, 2.00, 2.75, 1.89, 1.47, 1.20 for 1 ... 6 A GeV): ours is higher at 1 A GeV (2.55 against 1.03) and at 2 A GeV (17.5 against 9.1), similar at 3 - 5 A GeV (12.5 / 15.3, 6.2 / 5.65, 2.75 / 2.37) and higher at 6 A GeV (2.68 against 1.43).
+Maxwell, N = 7: 1.08, 1.92, 1.42, 1.79, 2.13, 2.14 (largest over smallest 1.98); N = 5: 1.02, 1.18, 1.13, 1.25, 1.37, 1.37 (1.34). All Maxwell values are at most 2.14 against a two-phase maximum of 17.5 (about 8 times smaller than the two-phase peak), but the Maxwell curve is not flat: it rises from 1.08 at 1 A GeV to 2.1 at 5 - 6 A GeV, where the two-phase and Maxwell results differ only by a factor 1.25 - 1.29 (N = 7); the digitised paper values for the Maxwell partner are 1.05 - 1.66 (N = 7). Standard errors of the Maxwell means are 0.01 - 0.41.
+Not tuned: no parameter was changed to approach the paper.
+
+### Reproducing and extending
+
+The commands are in `docs/running_collisions.md`, Sect. 13 (`tools/collisions/stage_b.sh`). SMASH reproducibility for the extension: 200 events with seed 1 at 1 and 6 A GeV start with events that are identical to the 50 events of the pilot files (checked on the GPU node by comparing the event blocks), so the pilot directories can be extended in place.

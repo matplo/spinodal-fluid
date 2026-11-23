@@ -211,3 +211,32 @@ Stage B estimate (not measured at the other energies): 2400 events with the tabl
 * **`eos.table_path is empty` / table checksum error**: generate the tables (section 2) or set `eos.table_path`; the reader refuses a table whose SHA-256 differs from its header.
 * **CUDA out of memory**: about 330 bytes per cell; use a smaller box or a larger dx.
 * **Different results on CPU and GPU in the 6th digit**: expected (summation order); compare ensembles, not single cells.
+
+## 13. Stage B pilot: commands, and extension to 200 events
+
+Pilot (1 ... 6 A GeV, 50 events per energy, finite-T table two-phase and Maxwell, the same events for both, dx = 0.2 fm, start time with R = 6.62 fm, 6 fm/c after t_init, boxes of `config/collisions/eN.json`; results in `docs/validation.md`, section "Stage B pilot"):
+
+```
+# on the GPU node, in the source tree with the tables in data/eos/generated (Sect. 2) and the cuda-turing75 build (Sect. 1)
+tools/collisions/stage_b.sh --bin build/cuda-turing75 --smash <smash build>/smash --out stage_b --energies "1 2 3 4 5 6" --nevents 50
+```
+
+For each energy `stage_b.sh` does (everything resumable): (1) `tools/collisions/gen_events.py --ekin E --nevents 50 --seed 1 --smash ... --out stage_b/smash/eE --extra --radius-mode fixed` (SMASH output at t_init = 2 R / sqrt(gamma_cm^2 - 1), R = 6.62 fm: 18.15, 12.84, 10.48, 9.08, 8.12, 7.41 fm/c); (2) `run_batch.py` on that file for event 0 of the two-phase run with `run.cell_diagnostics=true`, then for events 0 ... 49 of the two-phase run and of the Maxwell run, with `--config common.json --config stage_a.json --config eN.json --config t_init_fixed.json` and `eos.model=table_two_phase | table_maxwell`, output directories `stage_b/runs/eN_table_two_phase` and `..._table_maxwell`; (3) `aggregate.py --out stage_b/agg_eN --run two_phase=... --run maxwell=...`. The pilot was produced by an equivalent job script (the same commands; the first job ended after the 1 A GeV runs because of an error in that script and the second one continued in the same directories). Pilot tables and plots:
+
+```
+python3 tools/collisions/stageb_table.py --agg-root stage_b --runs-root stage_b/runs --energies 1 2 3 4 5 6 --out stageb_tables --paper tools/data
+for E in 1 2 3 4 5 6; do python3 tools/collisions/plot_stage.py --agg stage_b/agg_e$E --tp two_phase --mx maxwell --out plots_B --tag B_e$E --paper tools/data --runs-root stage_b/runs; done
+python3 tools/collisions/plot_scan.py --out plots_B --paper tools/data --tag B_scan --point 1:two_phase=stage_b/agg_e1/two_phase --point 1:maxwell=stage_b/agg_e1/maxwell ...   # one pair per energy
+python3 tools/collisions/plot_energy_grid.py --agg-root stage_b --energies 1 2 3 4 5 6 --out plots_B/B_moments_vs_energy.png
+```
+
+(`plot_stage.py --runs-root` is needed when the aggregation ran on another machine: `provenance.json` holds the original directory.)
+
+**Extension to 200 events in the same directories.** Copy the pilot directories back to the machine that runs (the `stage_b/runs` and `stage_b/smash` trees; for a new job stage them as inputs), then call the same command with a larger event count:
+
+```
+tools/collisions/stage_b.sh --bin build/cuda-turing75 --smash <smash build>/smash --out stage_b --energies "1 2 3 4 5 6" --nevents 200
+```
+
+`stage_b.sh` regenerates a SMASH file that holds fewer than 200 events with the same seed; the first 50 events of a longer file are identical to the pilot file (200 events with seed 1 at 1 and 6 A GeV compared with the pilot files: identical event blocks, checked on the GPU node), so `run_batch.py` skips events 0 ... 49 (their `summary.json` exists) and runs events 50 ... 199; `aggregate.py` then covers all 200 events. Cost: 12 h of GPU time for the extension at the pilot's 22 - 31 s per event. An interrupted call is continued by repeating it; use `--chunk` to bound what an interruption can cost.
+
