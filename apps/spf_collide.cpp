@@ -111,6 +111,8 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
     J["ic_outside_fraction_B"] = st.dep.outside_fraction_B;
     J["ic_limiter_cells"] = st.limiter_cells;
     J["recovery_failures_initial_state"] = fail_init;
+    const bool cell_diag = cfg.get<bool>("run.cell_diagnostics");
+    h.track_vacuum = cell_diag;
     const bool want_marg = cfg.get<bool>("run.marginals");
     nlohmann::json marg;
     if (want_marg) marg["start"] = marginals(h.interior_copy(h.U[0]), gc.n[0], gc.n[1], gc.n[2], gc.dx);
@@ -126,6 +128,32 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
     double fluid_end_time = std::nan("");
     bool armed = false;
     double wall_evolve = 0.0, wall_obs = 0.0;
+    // optional diagnostic (run.cell_diagnostics): floor and vacuum-cut cells, one line per step in cell_diagnostics.csv
+    std::ofstream dcsv;
+    nlohmann::json diag_sum;
+    double dmax_nfloor = 0, dmax_Ef = 0, dmax_Rf = 0, t_Ef = 0, t_Rf = 0, t_nfloor = 0;
+    nlohmann::json diag0;
+    auto diagnose = [&]() {
+      if (!cell_diag) return;
+      const auto d = h.diagnose_cells();
+      const double Et = d.E_tot != 0.0 ? d.E_tot : 1.0, Rt = d.R_tot != 0.0 ? d.R_tot : 1.0;
+      const double Ef = d.E_floor / Et, Rf = d.R_floor / Rt;
+      const double E0 = tot0.E != 0.0 ? tot0.E * v3 : 1.0, R0 = tot0.R != 0.0 ? tot0.R * v3 : 1.0;
+      if (!dcsv.is_open()) {
+        dcsv.open(edir + "/cell_diagnostics.csv");
+        dcsv << "step,t_fm,n_floor_cells,n_failed_cells,E_floor_fraction,R_floor_fraction,n_vac_cells,E_vac_fraction,R_vac_fraction,"
+                "vac_removed_cells_cumulative,vac_removed_E_fraction_cumulative,vac_removed_R_fraction_cumulative\n";
+        diag0 = {{"n_floor_cells", d.n_floor}, {"E_floor_fraction", Ef}, {"R_floor_fraction", Rf}, {"n_vac_cells", d.n_vac},
+                 {"E_vac_fraction", d.E_vac / Et}, {"R_vac_fraction", d.R_vac / Rt}};
+      }
+      char b[512];
+      std::snprintf(b, sizeof b, "%ld,%.10g,%ld,%ld,%.10e,%.10e,%ld,%.10e,%.10e,%ld,%.10e,%.10e\n", h.steps, h.time, d.n_floor, d.n_fail, Ef, Rf, d.n_vac,
+                    d.E_vac / Et, d.R_vac / Rt, h.vac_removed_cells, h.vac_removed_E / E0, h.vac_removed_R / R0);
+      dcsv << b;
+      if (d.n_floor > dmax_nfloor) { dmax_nfloor = d.n_floor; t_nfloor = h.time; }
+      if (Ef > dmax_Ef) { dmax_Ef = Ef; t_Ef = h.time; }
+      if (Rf > dmax_Rf) { dmax_Rf = Rf; t_Rf = h.time; }
+    };
     auto observe = [&]() {
       const auto t0 = Clock::now();
       const size_t before = rec.history().size();
@@ -140,6 +168,7 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
     if (fail_init > max_fail) {
       status = "recovery_failure";
     } else {
+      diagnose();
       observe();
       long s = 0;
       for (; s < nmax; ++s) {
@@ -148,6 +177,7 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
         Kokkos::fence();
         wall_evolve += seconds_since(t0);
         if (h.n_recover_fail_total - n0 > max_fail) { status = "recovery_failure"; ++s; break; }
+        diagnose();
         observe();
         if (stop_fe && !std::isnan(fluid_end_time)) { status = "fluid_end"; ++s; break; }
       }
@@ -195,6 +225,19 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
         me["N" + std::to_string(n)] = {{"value", best}, {"time_fm", tb}};
       }
       J["max_enhancement"] = me;
+    }
+    if (cell_diag) {
+      const double E0 = tot0.E != 0.0 ? tot0.E * v3 : 1.0, R0 = tot0.R != 0.0 ? tot0.R * v3 : 1.0;
+      J["cell_diagnostics"] = {{"definition", "floor cells: cells whose last recovery used the floor on the extra pressure (state after each step); fractions of the "
+                                              "energy / baryon number on the grid in those cells; vac: cells with E < shasta.e_vac_GeV_fm3"},
+                               {"e_vac_GeV_fm3", cfg.get<double>("shasta.e_vac_GeV_fm3")},
+                               {"initial_state", diag0},
+                               {"max_floor_cells", dmax_nfloor}, {"time_of_max_floor_cells_fm", t_nfloor},
+                               {"max_E_floor_fraction", dmax_Ef}, {"time_of_max_E_floor_fraction_fm", t_Ef},
+                               {"max_R_floor_fraction", dmax_Rf}, {"time_of_max_R_floor_fraction_fm", t_Rf},
+                               {"vacuum_cut_removed_cells_total", h.vac_removed_cells},
+                               {"vacuum_cut_removed_E_fraction_of_initial", h.vac_removed_E / E0},
+                               {"vacuum_cut_removed_R_fraction_of_initial", h.vac_removed_R / R0}};
     }
     J["wall_evolve_s"] = wall_evolve;
     J["wall_observe_s"] = wall_obs;
