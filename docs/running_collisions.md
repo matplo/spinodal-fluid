@@ -240,3 +240,22 @@ tools/collisions/stage_b.sh --bin build/cuda-turing75 --smash <smash build>/smas
 
 `stage_b.sh` regenerates a SMASH file that holds fewer than 200 events with the same seed; the first 50 events of a longer file are identical to the pilot file (200 events with seed 1 at 1 and 6 A GeV compared with the pilot files: identical event blocks, checked on the GPU node), so `run_batch.py` skips events 0 ... 49 (their `summary.json` exists) and runs events 50 ... 199; `aggregate.py` then covers all 200 events. Cost: 12 h of GPU time for the extension at the pilot's 22 - 31 s per event. An interrupted call is continued by repeating it; use `--chunk` to bound what an interruption can cost.
 
+
+## 14. Stage B follow-ups: commands
+
+All three on the GPU node, from main, same environment as Sect. 13. Pilot SMASH file: `smash/e3/smash_data/particle_lists.oscar` (seed 1).
+
+```sh
+CF="--config config/collisions/common.json --config config/collisions/stage_a.json --config config/collisions/e3.json --config config/collisions/t_init_fixed.json"
+# S1: resolution (3 A GeV, events 0-19, dx = 0.1 fm; 307 s and 14.2 GB GPU memory per event)
+tools/collisions/run_batch.py --exe build/cuda-turing75/spf_collide --oscar $OSC --out runs/s1_dx0.1_table_two_phase --first 0 --n 20 --chunk 5 $CF eos.model=table_two_phase grid.dx_fm=0.1
+tools/collisions/followup_s1_resolution.py --fine-tp runs/s1_dx0.1_table_two_phase --fine-mx runs/s1_dx0.1_table_maxwell --coarse-tp <pilot>/e3_table_two_phase --coarse-mx <pilot>/e3_table_maxwell --n 20 --plot s1_resolution.png
+# S2: initial state (50 events, dx = 0.2 fm); overrides: ic.sigma_init_fm=0.7 | ic.sigma_init_fm=0.5 | ic.gaussian_contraction=cm_gamma
+tools/collisions/run_batch.py ... --first 0 --n 50 --chunk 10 $CF eos.model=table_two_phase ic.sigma_init_fm=0.7
+tools/collisions/followup_s2_initstate.py --out s2_numbers.json baseline=<pilot>/e3_table_two_phase:<pilot>/e3_table_maxwell sigma0.7=<tp dir>:<mx dir> ...
+tools/collisions/followup_plot_s2.py s2_numbers.json s2_variants.png
+# S3: 200 events (resumable; three jobs of two energies)
+tools/collisions/stage_b.sh --bin build/cuda-turing75 --smash <smash>/smash --out . --energies "1 2" --nevents 200 --chunk 10
+tools/collisions/stageb_table.py --agg-root . --runs-root runs --energies 1 2 3 4 5 6 --out stageb_tables --paper tools/data
+tools/collisions/followup_s3_scan.py --runs-root runs --nev 200 --paper tools/data --out-prefix s3 --boot 20000
+```
