@@ -1093,7 +1093,7 @@ CPU / GPU check: event 0 at 3 A GeV (`cpu-openmp`, 16 threads, run through `stag
 
 ## WP7 - Stage B follow-ups (S1 resolution, S2 initial state, S3 statistics; 2026-11-24)
 
-Run from main 679c4b7 on the GPU node (NVIDIA TITAN RTX, 24 GB), finite-T tables (two-phase and Maxwell), `bicubic`, `config/collisions/{common,stage_a,e<E>,t_init_fixed}.json` (R = 6.62 fm start, full 6 fm/c, e_vac = 1e-8 GeV/fm^3), no tuning. Recovery failures: 0 in every run of S1, S2 and S3 (all 2 x 12 x 200 + 40 + 600 events finished with status t_max). Every number below is measured; the per-event maxima are the maxima over time of <rho^N>(t)/<rho^N>(t_init) of one event, averaged over events (standard error = s.d./sqrt(n)).
+Run from main 679c4b7 on the GPU node (NVIDIA TITAN RTX, 24 GB), finite-T tables (two-phase and Maxwell), `bicubic`, `config/collisions/{common,stage_a,e<E>,t_init_fixed}.json` (R = 6.62 fm start, full 6 fm/c, e_vac = 1e-8 GeV/fm^3), no tuning. Recovery failures: 0 in every run of S1, S2 and S3 (new runs: S1 40 = 20 events x 2 EoS at dx = 0.1 fm; S2 300 = 50 events x 3 variants x 2 EoS; S3 1800 = 150 new events x 6 energies x 2 EoS, giving 2400 events in the 200-event scan; all finished with status t_max). Every number below is measured; the per-event maxima are the maxima over time of <rho^N>(t)/<rho^N>(t_init) of one event, averaged over events (standard error = s.d./sqrt(n)).
 
 ### S1 - resolution: dx = 0.1 fm against dx = 0.2 fm, 3 A GeV, events 0-19 of the pilot file
 
