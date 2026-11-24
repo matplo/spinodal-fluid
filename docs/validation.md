@@ -1090,3 +1090,86 @@ Not tuned: no parameter was changed to approach the paper.
 The commands are in `docs/running_collisions.md`, Sect. 13 (`tools/collisions/stage_b.sh`). SMASH reproducibility for the extension: 200 events with seed 1 at 1 and 6 A GeV start with events that are identical to the 50 events of the pilot files (checked on the GPU node by comparing the event blocks), so the pilot directories can be extended in place.
 
 CPU / GPU check: event 0 at 3 A GeV (`cpu-openmp`, 16 threads, run through `stage_b.sh` as a test of the script) gives the N = 7 maxima 9.546131 (two-phase) and 1.413975 (Maxwell), equal to the GPU values of the pilot to the six digits shown.
+
+## WP7 - Stage B follow-ups (S1 resolution, S2 initial state, S3 statistics; 2026-11-24)
+
+Run from main 679c4b7 on the GPU node (NVIDIA TITAN RTX, 24 GB), finite-T tables (two-phase and Maxwell), `bicubic`, `config/collisions/{common,stage_a,e<E>,t_init_fixed}.json` (R = 6.62 fm start, full 6 fm/c, e_vac = 1e-8 GeV/fm^3), no tuning. Recovery failures: 0 in every run of S1, S2 and S3 (all 2 x 12 x 200 + 40 + 600 events finished with status t_max). Every number below is measured; the per-event maxima are the maxima over time of <rho^N>(t)/<rho^N>(t_init) of one event, averaged over events (standard error = s.d./sqrt(n)).
+
+### S1 - resolution: dx = 0.1 fm against dx = 0.2 fm, 3 A GeV, events 0-19 of the pilot file
+
+Same physical box (38 x 38 x 34 fm; 380 x 380 x 340 cells at dx = 0.1), same 20 events as the pilot at dx = 0.2 (paired per event). `tools/collisions/followup_s1_resolution.py`.
+
+| EoS | N | dx = 0.1 mean +- s.e. | dx = 0.2 mean +- s.e. (same 20 events) | paired mean of per-event ratios +- s.e. | ratio of means +- s.e. (delta method) | max of mean curve, dx 0.1 (t [fm]) | max of mean curve, dx 0.2 (t [fm]) |
+|---|---|---|---|---|---|---|---|
+| two_phase | 5 | 3.53 +- 0.52 | 2.63 +- 0.37 | 1.315 +- 0.037 | 1.344 +- 0.032 | 3.15 (1.72) | 2.45 (1.84) |
+| two_phase | 7 | 20.09 +- 3.98 | 11.50 +- 2.29 | 1.824 +- 0.135 | 1.748 +- 0.088 | 16.43 (1.76) | 10.23 (1.92) |
+| maxwell | 5 | 1.14 +- 0.03 | 1.13 +- 0.03 | 1.015 +- 0.006 | 1.017 +- 0.007 | 1.10 (1.00) | 1.09 (0.88) |
+| maxwell | 7 | 1.58 +- 0.16 | 1.38 +- 0.09 | 1.106 +- 0.039 | 1.143 +- 0.055 | 1.34 (1.72) | 1.27 (1.28) |
+
+Fluid end (mean over the 20 events; the runs continue to 6 fm/c): two-phase 3.58 fm (dx 0.1) against 3.49 fm (dx 0.2); Maxwell 3.50 against 3.39 fm. Cost: 307 s per event and 1.68 s per step at dx = 0.1 (150 steps), against 23.9 s per event at dx = 0.2 (75 steps): a factor 12.8. GPU memory 14184 MiB peak at dx = 0.1 (nvidia-smi, sampled every 2 s) against 2042 MiB at dx = 0.2; host RSS 1752 MB against 330 MB. Recovery failures: 0.
+
+The two-phase enhancement is not converged at dx = 0.2 fm: halving dx raises the N = 5 per-event maximum by a factor 1.32 +- 0.04 and N = 7 by 1.82 +- 0.14 (paired), the mean curves peak earlier (1.7 against 1.8-1.9 fm/c). The Maxwell result changes by 1.5 % (N = 5) and 11 % (N = 7). Convergence has not been reached between 0.2 and 0.1 fm; a dx = 0.05 fm run would need about 8 times the cells (about 110 GB of GPU memory by scaling, an estimate, not measured) and does not fit on this node. Consequence: the energy scan at dx = 0.2 fm (S3, Stage B) underestimates the two-phase amplification, and the two-phase/Maxwell ratio at 3 A GeV (N = 7) is 12.7 at dx = 0.1 on these 20 events against 8.3 at dx = 0.2 (ratio of the means above; paper Fig. 4: about 10).
+
+![S1](figures/s1_resolution.png)
+
+### S2 - initial state: Gaussian width and contraction, 3 A GeV, 50 pilot events, dx = 0.2 fm
+
+Variants: `ic.sigma_init_fm` = 0.7 and 0.5; `ic.gaussian_contraction = cm_gamma` (sigma 1.0 fm); baseline = pilot (sigma 1.0 fm, `particle_gamma_z`). Raw moments <rho^N>/<rho>^N at t_init (mean over the 50 events), paper = arXiv:1209.2462 Fig. 3 initial values. `tools/collisions/followup_s2_initstate.py`, `followup_plot_s2.py`.
+
+| variant | N=2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|
+| paper Fig. 3 | 1.47 | 2.61 | 5.16 | 11.0 | 24.9 | 59.1 |
+| baseline | 1.55 | 2.95 | 6.28 | 14.5 | 35.3 | 90.3 |
+| sigma0.7 | 1.59 | 3.25 | 7.75 | 20.7 | 60.2 | 189 |
+| sigma0.5 | 1.64 | 3.68 | 10.3 | 34 | 130 | 560 |
+| cmgamma | 1.61 | 3.2 | 7.23 | 17.8 | 46.7 | 129 |
+
+| variant | N | two-phase max mean +- s.e. | Maxwell max mean +- s.e. | two-phase / Maxwell (ratio of means +- s.e.) | max of two-phase mean curve (t [fm]) |
+|---|---|---|---|---|---|
+| baseline | 5 | 2.71 +- 0.27 | 1.125 +- 0.019 | 2.40 +- 0.22 | 2.46 (1.84) |
+| baseline | 7 | 12.53 +- 1.91 | 1.423 +- 0.074 | 8.80 +- 1.16 | 10.36 (1.92) |
+| sigma0.7 | 5 | 3.70 +- 0.20 | 1.667 +- 0.095 | 2.22 +- 0.07 | 3.28 (2.00) |
+| sigma0.7 | 7 | 13.70 +- 1.34 | 3.927 +- 0.481 | 3.49 +- 0.25 | 10.79 (2.24) |
+| sigma0.5 | 5 | 1.32 +- 0.06 | 1.162 +- 0.034 | 1.14 +- 0.02 | 1.14 (1.92) |
+| sigma0.5 | 7 | 1.99 +- 0.17 | 1.465 +- 0.091 | 1.36 +- 0.06 | 1.64 (2.32) |
+| cmgamma | 5 | 4.21 +- 0.29 | 1.370 +- 0.059 | 3.07 +- 0.14 | 3.85 (2.00) |
+| cmgamma | 7 | 18.76 +- 1.94 | 2.536 +- 0.283 | 7.40 +- 0.55 | 15.89 (2.16) |
+
+The baseline row is recomputed here from the 50 pilot events and is the same data as the pilot table. Cost 22-24 s per event, GPU memory 2042 MiB, 0 recovery failures, 0 initial-state limiter cells. Reading: a narrower Gaussian raises the initial moments (N = 7: 90 at sigma 1.0, 189 at 0.7, 560 at 0.5; paper 59), i.e. moves them away from the paper; the cm_gamma contraction also raises them (129). The enhancement relative to the initial value behaves non-monotonically (sigma 0.7 raises the two-phase N = 5 maximum and strongly raises Maxwell; sigma 0.5 suppresses both). None of the variants brings both the initial moments and the two-phase/Maxwell ratio to the paper values; the baseline has the initial moments closest to the paper and a two-phase/Maxwell N = 7 ratio of 8.8 (paper at 3 A GeV: 15.3/1.52, about 10); the ratio is 3.5, 1.4 and 7.4 for sigma 0.7, sigma 0.5 and cm_gamma.
+
+![S2](figures/s2_variants.png)
+
+### S3 - statistics: 200 events per energy (1-6 A GeV), dx = 0.2 fm
+
+The pilot (events 0-49) was extended in place with `tools/collisions/stage_b.sh --nevents 200` in three jobs (1+2, 3+4, 5+6 A GeV); events 0-49 were skipped (their summary files are byte-identical to the pilot: checked for event 17), events 50-199 were run from the same SMASH seed. Table B1 with 200 events:
+
+| E_lab [A GeV] | EoS | events | failures | N=7 per-event max: mean +- s.e. (s.d.) | N=5 per-event max | N=7 max of mean (t [fm]) | N=5 max of mean (t) | fluid end [fm] (events reaching it) | max baryon / energy leaving | wall per event [s] |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | two_phase | 200 | 0 | 2.19 +- 0.41 (5.78) | 1.16 +- 0.05 (0.75) | 1.35 (1.44) | 1.01 (0.16) | 0.92 (200) | 2.0e-05 / 8.0e-04 | 31.8 |
+| 1 | maxwell | 200 | 0 | 1.06 +- 0.01 (0.14) | 1.02 +- 0.00 (0.03) | 1.02 (0.16) | 1.01 (0.16) | 1.08 (200) | 2.0e-05 / 8.0e-04 | 31.9 |
+| 2 | two_phase | 200 | 0 | 17.43 +- 2.04 (28.79) | 3.02 +- 0.24 (3.42) | 12.93 (1.76) | 2.48 (1.68) | 2.65 (200) | 1.1e-05 / 8.8e-04 | 26.6 |
+| 2 | maxwell | 200 | 0 | 1.72 +- 0.15 (2.08) | 1.15 +- 0.03 (0.36) | 1.24 (1.20) | 1.06 (0.64) | 2.53 (200) | 1.1e-05 / 8.8e-04 | 26.6 |
+| 3 | two_phase | 200 | 0 | 13.08 +- 1.18 (16.75) | 2.75 +- 0.16 (2.30) | 10.01 (2.00) | 2.37 (1.92) | 3.58 (200) | 2.1e-05 / 5.3e-04 | 24.3 |
+| 3 | maxwell | 200 | 0 | 1.58 +- 0.06 (0.87) | 1.17 +- 0.02 (0.22) | 1.31 (1.52) | 1.10 (1.04) | 3.54 (200) | 2.1e-05 / 5.3e-04 | 24.3 |
+| 4 | two_phase | 200 | 0 | 5.90 +- 0.45 (6.33) | 1.93 +- 0.07 (1.02) | 4.43 (2.40) | 1.70 (2.24) | 4.47 (196) | 3.2e-06 / 3.3e-04 | 23.2 |
+| 4 | maxwell | 200 | 0 | 1.95 +- 0.12 (1.65) | 1.29 +- 0.03 (0.38) | 1.49 (2.16) | 1.17 (1.52) | 4.54 (195) | 3.2e-06 / 3.3e-04 | 23.2 |
+| 5 | two_phase | 200 | 0 | 2.68 +- 0.15 (2.13) | 1.48 +- 0.03 (0.45) | 2.10 (2.72) | 1.33 (2.48) | 5.06 (170) | 1.0e-05 / 5.5e-05 | 22.4 |
+| 5 | maxwell | 200 | 0 | 1.92 +- 0.08 (1.12) | 1.32 +- 0.02 (0.31) | 1.54 (4.24) | 1.17 (1.84) | 5.09 (166) | 1.0e-05 / 5.5e-05 | 22.4 |
+| 6 | two_phase | 200 | 0 | 2.49 +- 0.14 (1.96) | 1.48 +- 0.03 (0.47) | 2.05 (4.96) | 1.31 (4.56) | 5.42 (108) | 1.8e-06 / 4.4e-05 | 22.2 |
+| 6 | maxwell | 200 | 0 | 2.08 +- 0.10 (1.35) | 1.38 +- 0.03 (0.38) | 1.77 (5.12) | 1.24 (4.80) | 5.46 (104) | 1.8e-06 / 4.4e-05 | 22.2 |
+
+Enhancement versus E_lab (per-event maxima, N = 5, 7), compared with the digitised arXiv:1209.2462 Fig. 4 and arXiv:1302.2956 Fig. 6:
+
+![S3](figures/s3_enhancement_vs_E.png)
+
+Bootstrap over events (20000 resamples, seed 12345, independent per energy and EoS; `tools/collisions/followup_s3_scan.py`). Position of the maximum of the two-phase mean curve on the grid E = 1..6 A GeV:
+
+- N = 5: probability of the maximum at 2 / 3 A GeV = 0.826 / 0.174 (all other energies < 0.001); median 2 A GeV, 68 % interval [2, 3] A GeV (grid values). Mean(2) - mean(3) = 0.27 +- 0.29. Parabola in ln E through the maximum bin and its neighbours: vertex 2.20 A GeV (68 % [2.06, 2.46]); it is a smooth interpolation on a 1 A GeV grid, not a measurement.
+- N = 7: probability of the maximum at 2 / 3 A GeV = 0.972 / 0.028 (all other energies < 0.001); median 2 A GeV, 68 % interval [2, 2] A GeV (grid values). Mean(2) - mean(3) = 4.35 +- 2.33. Parabola in ln E through the maximum bin and its neighbours: vertex 2.05 A GeV (68 % [1.96, 2.19]); it is a smooth interpolation on a 1 A GeV grid, not a measurement.
+
+Maxwell curve:
+
+- N = 5: weighted linear slope 0.077 +- 0.005 per A GeV (P(slope > 0) = 1.000); mean(6) - mean(1) = 0.36 +- 0.03; P(strictly increasing at every step 1 -> 6) = 0.57.
+- N = 7: weighted linear slope 0.227 +- 0.020 per A GeV (P(slope > 0) = 1.000); mean(6) - mean(1) = 1.02 +- 0.10; P(strictly increasing at every step 1 -> 6) = 0.06.
+
+The Maxwell mean rises with energy over 1-6 A GeV (a statistically clear rise end to end), but it is not strictly monotonic: the 2 -> 3 and 5 -> 4 steps are within errors. The two-phase maximum is at 2 A GeV (grid), not at 3 A GeV as in the paper; 2 against 3 is resolved at 0.83 (N = 5) and 0.97 (N = 7) probability only. Systematics from resolution (S1) and the initial state (S2) are larger than the statistical error; the enhancement at dx = 0.1 fm is larger and the position of the maximum at that resolution has not been measured.
