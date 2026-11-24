@@ -71,3 +71,7 @@ docs               plan, decisions, validation log
 
 BSD 3-Clause, see `LICENSE`. Third-party components keep their own licences:
 Kokkos (Apache-2.0 WITH LLVM-exception), nlohmann_json (MIT), doctest (MIT).
+
+## Reports
+
+Status reports with figures are published at https://matplo.github.io/spinodal-fluid/reports/ (sources in `docs/reports/`).
