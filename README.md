@@ -31,6 +31,7 @@ been measured so far.
 | WP7 | collision runs: `spf_collide`, batch tools, Stage A (3 A GeV, 20 events, dx = 0.2 fm) | Stage A done, see `docs/running_collisions.md` and `docs/validation.md` (WP7 Stage A); Stage B pending |
 | WP6 | observables (moments, clumps, U_perp, phase plane), `spf_observe`, ensemble script | implemented, see `docs/validation.md` and `docs/observables.md` |
 | WP8 | linear-response library (dispersion relation, transport coefficients, G_k, Lalime), `spf_linear`, digitised Figs. 2-7 of arXiv:1007.1448 | implemented, see `docs/validation.md` (WP8); nuclear-EoS provider pending (WP2b) |
+| WP10a | switching (particlisation) surface: 4D iso-energy hypersurface finder on the GPU, initial slice, isochronous cross-check, surface file | implemented, see `docs/particlisation_format.md` and `docs/validation.md` (WP10a); the closure target 1e-3 at dx = 0.2 fm is not reached (reported) |
 
 ## Build
 
@@ -64,6 +65,7 @@ tools/digitise_1007_1448.py, tools/data   digitiser for the figures of arXiv:100
 tools/eos          Python reference for the two-phase equation of state, its reference numbers, and the EoS table writer
 config             default configuration; config/collisions: collision-run configurations (box in fm per energy)
 tools/collisions   event generation, batch runs, aggregation, plots; tools/digitise_wp7.py: digitised Figs. of arXiv:1209.2462 and 1302.2956
+tools/particlisation   surface reader, closure convergence, surface census (WP10a)
 docs               plan, decisions, validation log
 ```
 

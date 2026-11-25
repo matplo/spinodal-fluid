@@ -7,6 +7,9 @@
 // that value; run.stop_at_fluid_end), at run.t_max_after_init_fm after the start of the fluid stage, or when the number of primitive-recovery
 // failures exceeds run.max_recovery_failures. Events whose summary.json exists are skipped (run.resume) unless they ended in failure and
 // run.retry_failed is true. Exit code 0: every event ended with status fluid_end or t_max; 3: some event failed (see summary.json).
+// With particlisation.enabled (WP10a, config/collisions/common.json) the initial slice is emitted and removed at t_init, the event runs until no
+// cell has eps >= eps_sw (cap run.t_max_after_init_fm) and the surface is written to event_NNN/event_NNN.surface.{bin,json}
+// (docs/particlisation_format.md).
 // Documentation: docs/running_collisions.md.
 #include "spf/eos/dispatch.hpp"
 #include "spf/hydro3d.hpp"
