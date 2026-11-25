@@ -22,6 +22,7 @@ namespace spf::particlisation {
 
 struct SamplerOptions {
   std::string conservation = "global_B_Q";  // global_B_Q | poisson
+  std::string global_method = "exact_counts";  // exact_counts (eos_consistent; no rejection) | rejection (reference: baryon-stage and label rejection)
   std::string spline_policy = "use_table";  // use_table | skip
   int quad_nodes = 16;
   double spline_tol_rel = 0.02, spline_tol_abs_fm3 = 1e-6;
@@ -47,9 +48,13 @@ struct PrepReport {
   double skipped_B_flux = 0, skipped_E_flux_eps_only = 0;  // skipped elements (spline policy skip, cold elements): N.dsig and eps u^0 (u.dsig)
   double flagged_B_flux = 0;                                // elements flagged as spline region (also under use_table)
   double sum_lambda_total = 0;                              // Sum_s Lambda_s (expected candidates per trial)
+  std::vector<double> expected_accepted;                    // per species: expected number of accepted particles (Poisson mean of the accepted count)
+  double expected_net_B_accepted = 0;                       // sum_s B_s expected_accepted_s (equals B_integral_sampled when no element has negative p.dsig)
+  double expected_negative_fraction_number = 0;             // exact (quadrature) sum w^- / (sum w^+ + sum w^-), number weighted, all species
   long long B_target = 0, Q_target = 0;
   nlohmann::json to_json() const;
 };
+struct ExactCountTable;  // internal: conditional law of the antinucleon number (global_B_Q, exact_counts)
 
 struct SampleResult {
   std::vector<Particle> particles;
@@ -73,6 +78,9 @@ class Sampler {
 
  private:
   struct Tally;
+  bool one_candidate(std::size_t s, Rng& rng, std::vector<Particle>& out, Tally& tl) const;
+  bool run_species_n(std::size_t s, std::uint64_t n, Rng& rng, std::vector<Particle>& out, Tally& tl) const;
+  void build_exact_table();
   void run_species(std::size_t s, Rng& rng, std::vector<Particle>& out, Tally& tl) const;
   double species_mu(const Species& sp, const double* rec) const;
 
@@ -83,10 +91,24 @@ class Sampler {
   std::vector<std::vector<double>> cum_;  // per species: prefix sums over elements of lambda
   std::vector<double> lam_tot_;
   PrepReport rep_;
+  std::vector<double> acc_tot_, neg_tot_;  // per species: expected accepted number, expected rejected-negative number
+  // exact_counts: law of the antinucleon number nNb given (B, Q); pion charge pmf; truncation windows
+  long long tab_lo_ = 0;
+  std::vector<double> tab_cdf_, spmf_;
+  long long spmf_J_ = 0;
+  double mu_pi_ch_ = 0;  // mean of each charged-pion state
+  bool tab_ok_ = false;
 };
 
 // OSCAR2013 particle lists (the format SMASH's List modus reads): one event block per sample.
 void write_oscar2013(std::ostream& os, const std::vector<SampleResult>& samples, const std::string& generator);
+
+// Conditional charge counts (eos_consistent, global_B_Q, exact_counts). The accepted numbers of the charge states are independent Poisson variables
+// (isospin symmetry: p, n each with mean Abar_N/2, pbar, nbar Abar_Nbar/2, pi+, pi0, pi- Abar_pi/3), so the event is the Poisson process conditioned on
+// B = Np + Nn - Npb - Nnb and Q = Np - Npb + Npi+ - Npi-. Given the numbers nN = Np + Nn and nNb = Npb + Nnb of nucleons and antinucleons, this draws
+// a = Np, b = Npb, pp = Npi+, pm = Npi- with the exact conditional law given Q (charged pions Poisson with mean mu_pi_ch each, so that
+// P(a, b, pp, pm | nN, nNb, Q) ~ Bin(a; nN, 1/2) Bin(b; nNb, 1/2) Pois(pp) Pois(pm) on a - b + pp - pm = Q). Returns false when the weight vanishes.
+bool draw_charge_counts(Rng& rng, long long nN, long long nNb, double mu_pi_ch, long long Q, long long& a, long long& b, long long& pp, long long& pm);
 
 // Threads used by the sampler's parallel loops (1 without OpenMP).
 void set_threads(int n);

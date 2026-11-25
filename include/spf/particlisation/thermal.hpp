@@ -35,6 +35,16 @@ Thermal thermal_integrals(double m, double g, double T, double mu, Stat st, int 
 // Density only (cheaper by two thirds).
 double thermal_density(double m, double g, double T, double mu, Stat st, int nodes = 16);
 
+// Density n and mean acceptance alpha = <max(p*.dsig*, 0)/(E* dSigma_max)> of one species in an element with LRF dsig*_0 = d0 and |dsig*_vec| = s
+// (dSigma_max = |d0| + s), averaged over the thermal distribution and the isotropic direction: the expected number of accepted particles is n dSigma_max alpha.
+// Closed form for the angle: with v = k/E, the average of max(d0 - v s c, 0)/dSigma_max over c = cos(theta) in [-1, 1] is max(d0, 0)/dSigma_max for v s <= |d0|
+// (this covers every time-like element: alpha = max(d0, 0)/dSigma_max, n dSigma_max alpha = n d0 for d0 > 0) and (v s + d0)^2/(4 v s dSigma_max) otherwise;
+// the kink at v = |d0|/s is a panel edge of the momentum quadrature.
+struct DensityAcceptance {
+  double n = 0, alpha = 0;
+};
+DensityAcceptance thermal_density_acceptance(double m, double g, double T, double mu, Stat st, int nodes, double d0, double s);
+
 // One momentum modulus k (GeV) drawn from k^2 f(E) dk: panel by its weight, then rejection inside the panel
 // with the bound k_R^2 f(E(k_L)) (k^2 increases, f decreases with k: the bound is rigorous).
 double sample_momentum(double m, double T, double mu, Stat st, Rng& rng, int nodes = 16);

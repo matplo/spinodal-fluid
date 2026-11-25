@@ -10,6 +10,7 @@
 #include "spf/types.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -188,6 +189,82 @@ Expect expect_box(double T, double mu0, double mN, double mpi) {
 }
 
 }  // namespace
+
+
+// regularised upper incomplete gamma Q(a, x) (series / continued fraction) for chi-square p-values
+double gamma_q(double a, double x) {
+  if (x <= 0) return 1.0;
+  const double gln = std::lgamma(a);
+  if (x < a + 1) {
+    double ap = a, sum = 1.0 / a, del = sum;
+    for (int n = 0; n < 1000; ++n) { ap += 1; del *= x / ap; sum += del; if (std::fabs(del) < std::fabs(sum) * 1e-15) break; }
+    return 1.0 - sum * std::exp(-x + a * std::log(x) - gln);
+  }
+  double b = x + 1 - a, c = 1e300, d = 1 / b, h = d;
+  for (int i = 1; i < 1000; ++i) {
+    const double an = -i * (i - a);
+    b += 2;
+    d = an * d + b; if (std::fabs(d) < 1e-300) d = 1e-300;
+    c = b + an / c; if (std::fabs(c) < 1e-300) c = 1e-300;
+    d = 1 / d;
+    const double del = d * c;
+    h *= del;
+    if (std::fabs(del - 1) < 1e-15) break;
+  }
+  return std::exp(-x + a * std::log(x) - gln) * h;
+}
+// two-sample chi-square test of homogeneity of two histograms (bins with expected < 5 are pooled into the last bin); returns p and sets dof
+double chi2_two_sample(const std::vector<double>& h1, const std::vector<double>& h2, int& dof) {
+  const size_t n = std::max(h1.size(), h2.size());
+  std::vector<double> a(n, 0.0), b(n, 0.0);
+  for (size_t i = 0; i < h1.size(); ++i) a[i] = h1[i];
+  for (size_t i = 0; i < h2.size(); ++i) b[i] = h2[i];
+  double N1 = 0, N2 = 0;
+  for (size_t i = 0; i < n; ++i) { N1 += a[i]; N2 += b[i]; }
+  std::vector<double> ca, cb;
+  double pa = 0, pb = 0;
+  for (size_t i = 0; i < n; ++i) {
+    pa += a[i]; pb += b[i];
+    if (std::min(pa * N2 / (N1 + N2), pb * N1 / (N1 + N2)) >= 5.0 || (std::min(pa * N2, pb * N1) / (N1 + N2) >= 5.0)) { ca.push_back(pa); cb.push_back(pb); pa = pb = 0; }
+  }
+  if (pa + pb > 0 && !ca.empty()) { ca.back() += pa; cb.back() += pb; }
+  double chi = 0;
+  for (size_t i = 0; i < ca.size(); ++i) {
+    const double tot = ca[i] + cb[i];
+    const double e1 = tot * N1 / (N1 + N2), e2 = tot * N2 / (N1 + N2);
+    chi += (ca[i] - e1) * (ca[i] - e1) / e1 + (cb[i] - e2) * (cb[i] - e2) / e2;
+  }
+  dof = static_cast<int>(ca.size()) - 1;
+  return dof > 0 ? gamma_q(0.5 * dof, 0.5 * chi) : 1.0;
+}
+
+// synthetic isochronous surface of n_el elements in 100 temperature blocks, uniform rho = 0.15 fm^-3, about B_goal baryons, mu_B consistent with the hadron gas
+sp::Surface make_synth(size_t n_el, double B_goal) {
+  const double rho = 0.15, dV = B_goal / (rho * static_cast<double>(n_el)), dx = std::cbrt(dV);
+  const sp::MeanField mf = sp::MeanField::make(0.153, 0.94, 300.0);
+  const int nb = 100;
+  std::vector<double> Tb(nb), mub(nb);
+  for (int b = 0; b < nb; ++b) {
+    Tb[b] = 0.09 + 0.04 * b / (nb - 1);
+    double lo = 0.0, hi = 1.5;
+    for (int it = 0; it < 80; ++it) {
+      const double m = 0.5 * (lo + hi);
+      const double n = sp::thermal_density(0.94, 4, Tb[b], m, Stat::fermi, 24) - sp::thermal_density(0.94, 4, Tb[b], -m, Stat::fermi, 24);
+      (n < rho ? lo : hi) = m;
+    }
+    mub[b] = 0.5 * (lo + hi) + mf.dw(rho);
+  }
+  sp::Rng r(2);
+  sp::Surface s;
+  s.meta = sp::make_surface_meta("isochronous", dx, 0.1, 0);
+  s.rec.reserve(n_el * 16);
+  for (size_t i = 0; i < n_el; ++i) {
+    const int b = static_cast<int>(i / (n_el / nb));
+    const double rec[16] = {3.0, 10 * r.uniform(), 10 * r.uniform(), 10 * r.uniform(), dV, 0, 0, 0, 1, 0, 0, 0, 0.3, rho, Tb[b], mub[b]};
+    s.add_element(rec);
+  }
+  return s;
+}
 
 TEST_CASE("B1: thermal integrals against 40-digit quadrature and the Boltzmann limit") {
   struct Row { double m, g, T, mu; int stat; double n, e, P; };
@@ -490,6 +567,184 @@ TEST_CASE("B6: global_B_Q - exact B and Q, spectra agree with the poisson mode")
   CHECK(pv_m > 0.01);
 }
 
+TEST_CASE("B6: conditional charge counts (no rejection) against brute-force rejection of independent labels") {
+  // nN = 5 nucleons, nNb = 2 antinucleons, charged pions Poisson(mu = 1.3) per state, Q_target = 3.
+  // Brute force: draw all labels and pion numbers independently, keep those with Q = 3.
+  const long long nN = 5, nNb = 2, Qt = 3;
+  const double mu = 1.3;
+  sp::Rng rb(1), rc(2);
+  std::map<std::array<long long, 4>, double> hb, hc;
+  double nb = 0, nc = 0;
+  for (long long it = 0; it < 6000000; ++it) {
+    long long a = 0, b = 0;
+    for (int i = 0; i < nN; ++i) a += rb.below(2) == 0;
+    for (int i = 0; i < nNb; ++i) b += rb.below(2) == 0;
+    const long long pp = static_cast<long long>(rb.poisson(mu)), pm = static_cast<long long>(rb.poisson(mu));
+    if (a - b + pp - pm == Qt) { hb[{a, b, pp, pm}] += 1; nb += 1; }
+  }
+  for (long long it = 0; it < 400000; ++it) {
+    long long a, b, pp, pm;
+    REQUIRE(sp::draw_charge_counts(rc, nN, nNb, mu, Qt, a, b, pp, pm));
+    REQUIRE(a - b + pp - pm == Qt);
+    hc[{a, b, pp, pm}] += 1;
+    nc += 1;
+  }
+  std::vector<double> v1, v2;
+  for (const auto& kv : hb) { v1.push_back(kv.second); v2.push_back(hc.count(kv.first) ? hc[kv.first] : 0.0); }
+  for (const auto& kv : hc) if (!hb.count(kv.first)) { v1.push_back(0.0); v2.push_back(kv.second); }
+  int dof = 0;
+  const double pv = chi2_two_sample(v1, v2, dof);
+  std::printf("[B6] conditional charge counts: %zu cells, %.0f brute-force (accepted of 6e6) vs %.0f exact draws, chi2 homogeneity p = %.3f (dof %d)\n", v1.size(), nb, nc, pv, dof);
+  CHECK(pv > 0.01);
+  long long a, b, pp, pm;
+  CHECK_FALSE(sp::draw_charge_counts(rc, 2, 0, 0.0, 9, a, b, pp, pm));  // unreachable
+  CHECK(sp::draw_charge_counts(rc, 700, 3, 30.0, 276, a, b, pp, pm));  // large counts: no underflow
+  CHECK(a - b + pp - pm == 276);
+}
+
+TEST_CASE("Expected accepted numbers: closed-form angular average against the Monte Carlo of the poisson mode") {
+  const double T = 0.15, mu0 = 0.7, rho = 0.1;
+  const sp::MeanField mf = sp::MeanField::make(0.153, 0.94, 300.0);
+  const double muB = mu0 + mf.dw(rho);
+  struct Case { const char* name; double ds[4]; double u[4]; };
+  const double g = 1.0 / std::sqrt(1 - 0.36);
+  const Case cases[] = {{"static time-like", {50, 0, 0, 0}, {1, 0, 0, 0}},
+                        {"boosted time-like", {50, 0, 0, 0}, {g, 0.6 * g, 0, 0}},
+                        {"space-like d0 = 0", {0, 30, 0, 0}, {1, 0, 0, 0}},
+                        {"space-like moving, d0 > 0", {10, 25, 0, 0}, {g, 0.6 * g, 0, 0}},
+                        {"space-like moving, d0 < 0", {-8, 30, 10, 0}, {g, -0.6 * g, 0, 0}},
+                        {"time-like with d0 < 0", {-20, 0, 0, 0}, {1, 0, 0, 0}}};
+  const spf::Config cfg = sampler_cfg("poisson", {"sampler.seed=31"});
+  for (const Case& c : cases) {
+    sp::Sampler s(sp::SamplerOptions::from_config(cfg), one_element(c.ds, c.u, 0.2, rho, T, muB), sp::make_species_set(cfg));
+    const int ns = 4000;
+    const auto res = s.sample_all(ns);
+    double cnt[3] = {0, 0, 0};
+    for (const auto& r : res)
+      for (const auto& p : r.particles) cnt[p.baryon > 0 ? 0 : (p.baryon < 0 ? 1 : 2)] += 1;
+    double worst = 0;
+    std::string line;
+    for (int k = 0; k < 3; ++k) {
+      const double ex = s.report().expected_accepted[k], mean = cnt[k] / ns;
+      const double z = ex > 0 ? (mean - ex) / std::sqrt(ex / ns) : 0.0;
+      worst = std::max(worst, std::fabs(z));
+      char b[120];
+      std::snprintf(b, sizeof b, " %s %.4f vs %.4f (%.2f sigma);", k == 0 ? "N" : (k == 1 ? "Nbar" : "pi"), mean, ex, z);
+      line += b;
+    }
+    std::printf("[B6] expected accepted, %-26s:%s negative fraction (exact) %.4f\n", c.name, line.c_str(), s.report().expected_negative_fraction_number);
+    CHECK(worst < 3.5);
+  }
+  const double ds[4] = {0, 30, 0, 0}, u[4] = {1, 0, 0, 0};
+  sp::Sampler sx(sp::SamplerOptions::from_config(cfg), one_element(ds, u, 0.2, rho, T, muB), sp::make_species_set(cfg));
+  CHECK(std::fabs(sx.report().expected_negative_fraction_number - 0.5) < 1e-12);
+  const double ds2[4] = {50, 0, 0, 0}, u2[4] = {1, 0, 0, 0};
+  sp::Sampler st(sp::SamplerOptions::from_config(cfg), one_element(ds2, u2, 0.2, rho, T, muB), sp::make_species_set(cfg));
+  CHECK(st.report().expected_negative_fraction_number == 0.0);
+  const double nnet = sp::thermal_density(0.94, 4, T, mu0, Stat::fermi, 24) - sp::thermal_density(0.94, 4, T, -mu0, Stat::fermi, 24);
+  CHECK(st.report().expected_net_B_accepted == doctest::Approx(50.0 * nnet).epsilon(1e-10));
+}
+
+TEST_CASE("B6: global_B_Q against the poisson mode conditioned on (B, Q) by brute-force rejection, small system") {
+  const double V = 80.0, T = 0.17, mu0 = 0.40;
+  const sp::MeanField mf = sp::MeanField::make(0.153, 0.94, 300.0);
+  const double nnet = sp::thermal_density(0.94, 4, T, mu0, Stat::fermi, 24) - sp::thermal_density(0.94, 4, T, -mu0, Stat::fermi, 24);
+  const double ds[4] = {V, 0, 0, 0}, u[4] = {1, 0, 0, 0};
+  const sp::Surface surf = one_element(ds, u, 0.2, nnet, T, mu0 + mf.dw(nnet));
+  const std::vector<std::string> ex = {"sampler.charge_Z=1.0", "sampler.charge_A=2.0", "sampler.seed=77"};
+  const spf::Config cg = sampler_cfg("global_B_Q", ex), cp = sampler_cfg("poisson", ex);
+  sp::Sampler sg(sp::SamplerOptions::from_config(cg), surf, sp::make_species_set(cg)), sq(sp::SamplerOptions::from_config(cp), surf, sp::make_species_set(cp));
+  const long long Bt = sg.report().B_target, Qt = sg.report().Q_target;
+  const int ng = 24000;
+  const auto rg = sg.sample_all(ng);
+  const int npois = 480000;
+  const auto rp = sq.sample_all(npois);
+  // histograms of the charge-state multiplicities and spectra
+  const std::vector<int> pd = {2212, 2112, -2212, -2112, 211, 111, -211};
+  std::vector<std::vector<double>> hg(7, std::vector<double>(80, 0.0)), hq(7, std::vector<double>(80, 0.0));
+  std::vector<std::vector<double>> kg(7), kq(7);
+  size_t nacc = 0;
+  for (const auto& r : rg) {
+    std::vector<int> c(7, 0);
+    for (const auto& p : r.particles)
+      for (int i = 0; i < 7; ++i)
+        if (p.pdg == pd[i]) { ++c[i]; kg[i].push_back(std::sqrt(p.px * p.px + p.py * p.py + p.pz * p.pz)); }
+    for (int i = 0; i < 7; ++i) hg[i][std::min(c[i], 79)] += 1;
+  }
+  for (const auto& r : rp) {
+    long long B = 0, Q = 0;
+    std::vector<int> c(7, 0);
+    for (const auto& p : r.particles) { B += p.baryon; Q += p.charge; for (int i = 0; i < 7; ++i) if (p.pdg == pd[i]) ++c[i]; }
+    if (B != Bt || Q != Qt) continue;
+    ++nacc;
+    for (const auto& p : r.particles)
+      for (int i = 0; i < 7; ++i)
+        if (p.pdg == pd[i]) kq[i].push_back(std::sqrt(p.px * p.px + p.py * p.py + p.pz * p.pz));
+    for (int i = 0; i < 7; ++i) hq[i][std::min(c[i], 79)] += 1;
+  }
+  std::printf("[B6] small system (B_target %lld, Q_target %lld): global_B_Q %d samples; poisson mode %d samples, %zu with B and Q on target (brute-force acceptance %.4f)\n", Bt, Qt, ng, npois, nacc, static_cast<double>(nacc) / npois);
+  REQUIRE(nacc > 5000);
+  const char* names[7] = {"p", "n", "pbar", "nbar", "pi+", "pi0", "pi-"};
+  double minchi = 1, minks = 1;
+  for (int i = 0; i < 7; ++i) {
+    int dof;
+    const double pc = chi2_two_sample(hg[i], hq[i], dof);
+    double pk = 1;
+    if (kg[i].size() > 100 && kq[i].size() > 100) ks_two(kg[i], kq[i], pk);
+    minchi = std::min(minchi, pc);
+    minks = std::min(minks, pk);
+    std::printf("[B6]   %-5s multiplicity chi2 p = %.3f (dof %d); |p| KS p = %.3f (%zu vs %zu values)\n", names[i], pc, dof, pk, kg[i].size(), kq[i].size());
+    CHECK(pc > 0.01);
+    CHECK(pk > 0.01);
+  }
+  std::printf("[B6] smallest chi2 p = %.3f, smallest KS p = %.3f\n", minchi, minks);
+}
+
+TEST_CASE("B6: reference method (baryon and label rejection) agrees with exact_counts") {
+  const double V = 200.0, T = 0.15, mu0 = 0.70;
+  const sp::MeanField mf = sp::MeanField::make(0.153, 0.94, 300.0);
+  const double nnet = sp::thermal_density(0.94, 4, T, mu0, Stat::fermi, 24) - sp::thermal_density(0.94, 4, T, -mu0, Stat::fermi, 24);
+  const double ds[4] = {V, 0, 0, 0}, u[4] = {1, 0, 0, 0};
+  const sp::Surface surf = one_element(ds, u, 0.2, nnet, T, mu0 + mf.dw(nnet));
+  const spf::Config ce = sampler_cfg("global_B_Q"), cr = sampler_cfg("global_B_Q", {"sampler.global_method=rejection", "sampler.seed=5"});
+  sp::Sampler se(sp::SamplerOptions::from_config(ce), surf, sp::make_species_set(ce)), sr(sp::SamplerOptions::from_config(cr), surf, sp::make_species_set(cr));
+  const int ns = 1500;
+  const auto a = se.sample_all(ns), b = sr.sample_all(ns);
+  const auto ca = counts_per_pdg(a, kPdgs), cb = counts_per_pdg(b, kPdgs);
+  double worst = 0;
+  for (int i = 0; i < 7; ++i) {
+    const double z = (mean_of(ca.at(kPdgs[i])) - mean_of(cb.at(kPdgs[i]))) / std::sqrt(std::pow(sem_of(ca.at(kPdgs[i])), 2) + std::pow(sem_of(cb.at(kPdgs[i])), 2));
+    worst = std::max(worst, std::fabs(z));
+    std::printf("[B6] exact_counts vs rejection, %-5s: <N> %.4f vs %.4f (%.2f sigma)\n", kPdgNames[i], mean_of(ca.at(kPdgs[i])), mean_of(cb.at(kPdgs[i])), z);
+    CHECK(std::fabs(z) < 3.5);
+  }
+  double trials = 0, labels = 0;
+  for (const auto& r : b) { trials += r.summary["efficiency"]["trials_baryon_or_joint"].get<double>(); labels += r.summary["efficiency"]["trials_charge_labels"].get<double>(); }
+  std::printf("[B6] rejection reference at B_target %lld, Q_target %lld: baryon-stage acceptance %.4f, charge-label acceptance %.4f; exact_counts: 1 and 1\n", se.report().B_target, se.report().Q_target, ns / trials, ns / labels);
+}
+
+TEST_CASE("B6: baryon-stage acceptance at B_target = 100, 200, 400 (global_B_Q)") {
+  const spf::Config cfg = sampler_cfg("global_B_Q", {"sampler.global_method=rejection"});
+  for (double Bg : {100.0, 200.0, 400.0}) {
+    sp::Sampler smp(sp::SamplerOptions::from_config(cfg), make_synth(100000, Bg), sp::make_species_set(cfg));
+    const int ns = Bg > 300 ? 60 : 200;  // the label rejection of the reference method is slow at B = 400
+    const auto res = smp.sample_all(ns);
+    double trials = 0, trl = 0;
+    int ok = 0;
+    for (const auto& r : res) {
+      long long B = 0, Q = 0;
+      for (const auto& p : r.particles) { B += p.baryon; Q += p.charge; }
+      ok += r.ok && B == smp.report().B_target && Q == smp.report().Q_target;
+      trials += r.summary["efficiency"]["trials_baryon_or_joint"].get<double>();
+      trl += r.summary["efficiency"]["trials_charge_labels"].get<double>();
+    }
+    std::printf("[B6] B_target %lld, Q_target %lld: baryon-stage acceptance = %d / %.0f trials = %.4f (1/sqrt(2 pi (N+Nbar)) estimate %.4f); charge-label stage: %.0f label draws for %d samples (acceptance %.2e); %d of %d exact in B and Q\n",
+                smp.report().B_target, smp.report().Q_target, ns, trials, ns / trials, 1.0 / std::sqrt(2 * kPi * Bg), trl, ns, ns / trl, ok, ns);
+    CHECK(ok == ns);
+    CHECK(ns / trials > 0.01);
+  }
+}
+
 TEST_CASE("B7: reproducibility - same seed identical, thread counts identical, different seed differs") {
   // 300 varied elements
   sp::Rng r(99);
@@ -703,44 +958,19 @@ TEST_CASE("hrg species: PDG rules, particles.txt parsing, static-box yields, B a
   fs::remove_all(dir);
 }
 
-TEST_CASE("B8: performance on a synthetic surface of 1e6 elements with about 400 baryons per sample") {
+TEST_CASE("B8: performance on a synthetic surface of 1e6 elements, B_target 400, Q_target 158, global_B_Q and poisson") {
   const size_t N = 1000000;
-  const double rho = 0.15, B_goal = 400.0;
-  const double dV = B_goal / (rho * static_cast<double>(N)), dx = std::cbrt(dV);
-  const sp::MeanField mf = sp::MeanField::make(0.153, 0.94, 300.0);
-  // 100 blocks of 10^4 elements; the temperature varies from block to block, mu_B is solved so that n_N - n_Nbar = rho (hadron-phase consistent)
-  const int nb = 100;
-  std::vector<double> Tb(nb), mub(nb);
-  for (int b = 0; b < nb; ++b) {
-    Tb[b] = 0.09 + 0.04 * b / (nb - 1);
-    double lo = 0.0, hi = 1.5;
-    for (int it = 0; it < 80; ++it) {
-      const double m = 0.5 * (lo + hi);
-      const double n = sp::thermal_density(0.94, 4, Tb[b], m, Stat::fermi, 24) - sp::thermal_density(0.94, 4, Tb[b], -m, Stat::fermi, 24);
-      (n < rho ? lo : hi) = m;
-    }
-    mub[b] = 0.5 * (lo + hi) + mf.dw(rho);
-  }
-  sp::Rng r(2);
-  sp::Surface s;
-  s.meta = sp::make_surface_meta("isochronous", dx, 0.1, 0);
-  s.rec.reserve(N * 16);
-  for (size_t i = 0; i < N; ++i) {
-    const int b = static_cast<int>(i / (N / nb));
-    const double rec[16] = {3.0, 10 * r.uniform(), 10 * r.uniform(), 10 * r.uniform(), dV, 0, 0, 0, 1, 0, 0, 0, 0.3, rho, Tb[b], mub[b]};
-    s.add_element(rec);
-  }
-  const spf::Config cfg = sampler_cfg("global_B_Q");
-  const auto t0 = std::chrono::steady_clock::now();
-  sp::Sampler smp(sp::SamplerOptions::from_config(cfg), std::move(s), sp::make_species_set(cfg));
-  const double tprep = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-  const int hw = sp::max_threads();
+  const double dV0 = 400.0 / (0.15 * static_cast<double>(N));
+  (void)dV0;
+  const spf::Config cfg = sampler_cfg("global_B_Q"), cfgp = sampler_cfg("poisson");
+  sp::Surface surf = make_synth(N, 400.0);
   {  // preparation cost without the shared-state cache: 20000 elements, all with a different temperature
     sp::Surface d;
-    d.meta = sp::make_surface_meta("isochronous", dx, 0.1, 0);
+    d.meta = surf.meta;
     for (int i = 0; i < 20000; ++i) {
-      const double Tn = 0.09 + 0.04 * i / 20000.0;
-      const double rec[16] = {3.0, 0, 0, 0, dV, 0, 0, 0, 1, 0, 0, 0, 0.3, rho, Tn, mub[nb / 2]};
+      double rec[16];
+      std::copy(surf.at(static_cast<size_t>(i) * 50), surf.at(static_cast<size_t>(i) * 50) + 16, rec);
+      rec[14] = 0.09 + 0.04 * i / 20000.0;
       d.add_element(rec);
     }
     const auto t2 = std::chrono::steady_clock::now();
@@ -748,32 +978,39 @@ TEST_CASE("B8: performance on a synthetic surface of 1e6 elements with about 400
     const double tp = std::chrono::duration<double>(std::chrono::steady_clock::now() - t2).count();
     std::printf("[B8] preparation of 20000 elements with distinct states (no cache hits): %.3f s = %.1f us per element (%d threads)\n", tp, 1e6 * tp / 20000, sp::max_threads());
   }
-  std::printf("[B8] 1e6 elements: preparation %.2f s (%d threads), B_target %lld, Q_target %lld, expected candidates per trial %.1f\n", tprep, hw, smp.report().B_target,
-              smp.report().Q_target, smp.report().sum_lambda_total);
-  CHECK(smp.report().B_target > 300);
-  CHECK(smp.report().B_target < 500);
-  for (int threads : {1, 16}) {
-    sp::set_threads(threads);
-    const int ns = threads == 1 ? 24 : 192;
-    const auto t1 = std::chrono::steady_clock::now();
-    const auto res = smp.sample_all(ns);
-    const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count();
-    int ok = 0;
-    double npart = 0, trials = 0;
-    for (const auto& x : res) {
-      long long B = 0;
-      for (const auto& p : x.particles) B += p.baryon;
-      ok += x.ok && B == smp.report().B_target;
-      npart += x.particles.size();
-      trials += x.summary["efficiency"]["trials_baryon_or_joint"].get<double>();
+  const int hw = sp::max_threads();
+  const auto t0 = std::chrono::steady_clock::now();
+  sp::Sampler smg(sp::SamplerOptions::from_config(cfg), surf, sp::make_species_set(cfg));
+  const double tprep = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  sp::Sampler smp(sp::SamplerOptions::from_config(cfgp), std::move(surf), sp::make_species_set(cfgp));
+  std::printf("[B8] 1e6 elements: preparation %.2f s (%d threads), B_target %lld, Q_target %lld, expected candidates per trial %.1f\n", tprep, hw, smg.report().B_target, smg.report().Q_target, smg.report().sum_lambda_total);
+  CHECK(smg.report().B_target == 400);
+  CHECK(smg.report().Q_target == 158);
+  struct Run { const char* mode; const sp::Sampler* s; int n1, n16; };
+  for (const Run& run : {Run{"global_B_Q", &smg, 40, 320}, Run{"poisson", &smp, 400, 3200}})
+    for (int threads : {1, 16}) {
+      sp::set_threads(threads);
+      const int ns = threads == 1 ? run.n1 : run.n16;
+      const auto t1 = std::chrono::steady_clock::now();
+      const auto res = run.s->sample_all(ns);
+      const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count();
+      int ok = 0, exact = 0;
+      double npart = 0, trials = 0;
+      for (const auto& x : res) {
+        long long B = 0, Q = 0;
+        for (const auto& p : x.particles) { B += p.baryon; Q += p.charge; }
+        ok += x.ok;
+        exact += x.ok && B == 400 && Q == 158;
+        npart += x.particles.size();
+        trials += x.summary["efficiency"]["trials_baryon_or_joint"].get<double>();
+      }
+      std::printf("[B8] %-10s threads requested %2d (OpenMP max %2d): %4d accepted samples in %.2f s = %.2f samples/s (%.1f ms per sample per thread-run); mean %.0f particles, %.1f baryon trials per sample; %d of %d with B = 400 and Q = 158\n",
+                  run.mode, threads, sp::max_threads(), ok, dt, ok / dt, 1e3 * dt / ns, npart / ns, trials / ns, exact, ns);
+      CHECK(ok == ns);
+      if (std::string(run.mode) == "global_B_Q") CHECK(exact == ns);
     }
-    std::printf("[B8] threads requested %d (OpenMP max %d): %d samples in %.2f s = %.2f samples/s; mean %.0f particles and %.1f baryon trials per sample; %d of %d exact in B\n", threads,
-                sp::max_threads(), ns, dt, ns / dt, npart / ns, trials / ns, ok, ns);
-    CHECK(ok == ns);
-  }
   sp::set_threads(hw);
 }
-
 
 TEST_CASE("spf_sample application: surface file in, OSCAR2013 and JSON summary out") {
   namespace fs = std::filesystem;

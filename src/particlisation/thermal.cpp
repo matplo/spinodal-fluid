@@ -147,6 +147,44 @@ double thermal_density(double m, double g, double T, double mu, Stat st, int nod
   return g / (2.0 * pi * pi) / (kHbarcGeVfm * kHbarcGeVfm * kHbarcGeVfm) * sn;
 }
 
+DensityAcceptance thermal_density_acceptance(double m, double g, double T, double mu, Stat st, int nodes, double d0, double s) {
+  DensityAcceptance out;
+  const double dmax = std::fabs(d0) + s;
+  if (!(dmax > 0.0)) return out;
+  if (s <= std::fabs(d0)) {
+    out.n = thermal_density(m, g, T, mu, st, nodes);
+    out.alpha = std::max(d0, 0.0) / dmax;
+    return out;
+  }
+  thread_local std::vector<double> ed;
+  thermal_edges(m, T, mu, st, ed);
+  const double r = std::fabs(d0) / s;  // < 1: kink at v = r
+  if (r > 0.0) {
+    const double ks = m * r / std::sqrt(1.0 - r * r);
+    if (ks < ed.back()) ed.insert(std::upper_bound(ed.begin(), ed.end(), ks), ks);
+  }
+  const GL& q = gl(nodes);
+  double sn = 0, sa = 0;
+  for (size_t p = 0; p + 1 < ed.size(); ++p) {
+    const double a = ed[p], b = ed[p + 1], h = 0.5 * (b - a), c = 0.5 * (b + a);
+    double pn = 0, pa = 0;
+    for (int i = 0; i < nodes; ++i) {
+      const double k = c + h * q.x[i], E = std::sqrt(k * k + m * m);
+      const double w = k * k * occupation(st, (E - mu) / T) * q.w[i];
+      const double vs = k / E * s;
+      const double A = vs <= std::fabs(d0) ? std::max(d0, 0.0) / dmax : (vs + d0) * (vs + d0) / (4.0 * vs * dmax);
+      pn += w;
+      pa += w * A;
+    }
+    sn += h * pn;
+    sa += h * pa;
+  }
+  const double pi = 3.14159265358979323846;
+  out.n = g / (2.0 * pi * pi) / (kHbarcGeVfm * kHbarcGeVfm * kHbarcGeVfm) * sn;
+  out.alpha = sn > 0 ? sa / sn : 0.0;
+  return out;
+}
+
 double sample_momentum(double m, double T, double mu, Stat st, Rng& rng, int nodes) {
   thread_local std::vector<double> ed, W;
   thermal_edges(m, T, mu, st, ed);

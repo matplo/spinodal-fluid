@@ -143,6 +143,7 @@
     "hrg_particles_file": "",
     "hrg_max_mass_GeV": 0.0,
     "conservation": "global_B_Q",
+    "global_method": "exact_counts",
     "charge_Z": 82.0,
     "charge_A": 208.0,
     "spline_policy": "use_table",

@@ -32,6 +32,8 @@ SamplerOptions SamplerOptions::from_config(const Config& c) {
   SamplerOptions o;
   o.conservation = c.get<std::string>("sampler.conservation");
   o.spline_policy = c.get<std::string>("sampler.spline_policy");
+  o.global_method = c.get<std::string>("sampler.global_method");
+  if (o.global_method != "exact_counts" && o.global_method != "rejection") throw ConfigError("unknown sampler.global_method '" + o.global_method + "' (exact_counts | rejection)");
   if (o.conservation != "global_B_Q" && o.conservation != "poisson") throw ConfigError("unknown sampler.conservation '" + o.conservation + "' (global_B_Q | poisson)");
   if (o.spline_policy != "use_table" && o.spline_policy != "skip") throw ConfigError("unknown sampler.spline_policy '" + o.spline_policy + "' (use_table | skip)");
   o.quad_nodes = c.get<int>("sampler.quad_nodes");
@@ -65,6 +67,9 @@ nlohmann::json PrepReport::to_json() const {
   j["skipped_E_flux_pressure_neglected"] = skipped_E_flux_eps_only;
   j["spline_flagged_B_flux"] = flagged_B_flux;
   j["expected_candidates_per_trial"] = sum_lambda_total;
+  j["expected_accepted_per_species"] = expected_accepted;
+  j["expected_net_B_accepted"] = expected_net_B_accepted;
+  j["expected_negative_fraction_number"] = expected_negative_fraction_number;
   j["B_target"] = B_target;
   j["Q_target"] = Q_target;
   return j;
@@ -106,6 +111,12 @@ Sampler::Sampler(const SamplerOptions& opt, Surface surf, SpeciesSet set) : opt_
   std::vector<unsigned char> sflag(n, 0);  // 1: spline region (also if used)
   const Species nucleon = make_eos_consistent_set(opt_.mN_GeV, 0.14, true).species[0];
   const bool skip_spline = opt_.spline_policy == "skip";
+  const bool want_acc = set_.kind == "eos_consistent";
+  std::vector<std::vector<double>> accA, negA;
+  if (want_acc) {
+    accA.assign(ns, std::vector<double>(n, 0.0));
+    negA.assign(ns, std::vector<double>(n, 0.0));
+  }
 
 #pragma omp parallel
   {
@@ -139,7 +150,19 @@ Sampler::Sampler(const SamplerOptions& opt, Surface surf, SpeciesSet set) : opt_
         flag[i] = 1;
         continue;
       }
-      for (std::size_t s = 0; s < ns; ++s) cum_[s][i] = dens[s] * k.dmax;
+      const double slen = k.dmax - std::fabs(k.d0);
+      const bool spacelike = slen > std::fabs(k.d0);
+      for (std::size_t s = 0; s < ns; ++s) {
+        const double lam = dens[s] * k.dmax;
+        cum_[s][i] = lam;
+        if (want_acc) {
+          const Species& sp = set_.species[s];
+          const double alpha = spacelike ? thermal_density_acceptance(sp.mass, sp.g, T, species_mu(sp, r), sp.stat, opt_.quad_nodes, k.d0, slen).alpha
+                                         : std::max(k.d0, 0.0) / k.dmax;
+          accA[s][i] = lam * alpha;
+          negA[s][i] = lam * (alpha - k.d0 / k.dmax);
+        }
+      }
     }
   }
   // serial pass: fluxes, prefix sums (fixed summation order, independent of the thread count)
@@ -173,8 +196,25 @@ Sampler::Sampler(const SamplerOptions& opt, Surface surf, SpeciesSet set) : opt_
     lam_tot_[s] = acc;
     rep_.sum_lambda_total += acc;
   }
+  acc_tot_.assign(ns, 0.0);
+  neg_tot_.assign(ns, 0.0);
+  if (want_acc) {
+    double pos = 0, neg = 0;
+    for (std::size_t s = 0; s < ns; ++s) {
+      double a = 0, g = 0;
+      for (std::size_t i = 0; i < n; ++i) { a += accA[s][i]; g += negA[s][i]; }
+      acc_tot_[s] = a;
+      neg_tot_[s] = g;
+      pos += a;
+      neg += g;
+      rep_.expected_net_B_accepted += set_.species[s].baryon * a;
+    }
+    rep_.expected_accepted = acc_tot_;
+    rep_.expected_negative_fraction_number = pos + neg > 0 ? neg / (pos + neg) : 0.0;
+  }
   rep_.B_target = std::llround(rep_.B_integral_sampled);
   rep_.Q_target = std::llround(static_cast<double>(rep_.B_target) * opt_.charge_Z / opt_.charge_A);
+  if (opt_.conservation == "global_B_Q" && opt_.global_method == "exact_counts" && set_.kind == "eos_consistent") build_exact_table();
 }
 
 struct Sampler::Tally {
@@ -185,16 +225,13 @@ struct Sampler::Tally {
   }
 };
 
-void Sampler::run_species(std::size_t s, Rng& rng, std::vector<Particle>& out, Tally& tl) const {
+bool Sampler::one_candidate(std::size_t s, Rng& rng, std::vector<Particle>& out, Tally& tl) const {
   const double L = lam_tot_[s];
-  if (!(L > 0.0)) return;
   const Species& sp = set_.species[s];
   const std::vector<double>& cum = cum_[s];
-  const std::uint64_t nc = rng.poisson(L);
-  tl.ncand += nc;
   const double dx = surf_.dx();
   const double pi2 = 2.0 * 3.14159265358979323846;
-  for (std::uint64_t c = 0; c < nc; ++c) {
+  ++tl.ncand;
     const double r = rng.uniform() * L;
     std::size_t e = static_cast<std::size_t>(std::upper_bound(cum.begin(), cum.end(), r) - cum.begin());
     if (e >= cum.size()) e = cum.size() - 1;
@@ -215,7 +252,7 @@ void Sampler::run_species(std::size_t s, Rng& rng, std::vector<Particle>& out, T
     tl.pos_n += wp; tl.neg_n += wn;
     tl.pos_E += wp * p0; tl.neg_E += wn * p0;
     tl.pos_B += wp * ab; tl.neg_B += wn * ab;
-    if (!(rng.uniform() < w)) continue;
+    if (!(rng.uniform() < w)) return false;
     Particle p;
     p.px = ps[0] + u[1] * fac;
     p.py = ps[1] + u[2] * fac;
@@ -236,7 +273,26 @@ void Sampler::run_species(std::size_t s, Rng& rng, std::vector<Particle>& out, T
     p.baryon = sp.baryon;
     p.species = static_cast<int>(s);
     out.push_back(p);
+    return true;
+}
+
+void Sampler::run_species(std::size_t s, Rng& rng, std::vector<Particle>& out, Tally& tl) const {
+  const double L = lam_tot_[s];
+  if (!(L > 0.0)) return;
+  const std::uint64_t nc = rng.poisson(L);
+  for (std::uint64_t c = 0; c < nc; ++c) one_candidate(s, rng, out, tl);
+}
+
+// exactly n accepted particles of species s: candidates are drawn until n are accepted (the accepted ones are iid from the accepted intensity)
+bool Sampler::run_species_n(std::size_t s, std::uint64_t n, Rng& rng, std::vector<Particle>& out, Tally& tl) const {
+  if (n == 0) return true;
+  if (!(lam_tot_[s] > 0.0)) return false;
+  std::uint64_t got = 0, cap = 1000 * n + 1000000;
+  while (got < n) {
+    if (cap-- == 0) return false;
+    got += one_candidate(s, rng, out, tl) ? 1 : 0;
   }
+  return true;
 }
 
 namespace {
@@ -278,10 +334,53 @@ SampleResult Sampler::sample(int sample_id) const {
     return q;
   };
 
+  const bool exact = global && labelled && opt_.global_method == "exact_counts";
+  std::vector<unsigned char> lab;
   if (!global) {
     for (std::size_t s = 0; s < ns; ++s) run_species(s, rng, P, tl);
+  } else if (exact) {
+    // Poisson process conditioned on (B, Q) without rejection: counts from the exact conditional law, then exactly that many accepted particles per group
+    std::size_t iN = 0, iNb = 0, iPi = 0;
+    for (std::size_t s = 0; s < ns; ++s) {
+      if (set_.species[s].baryon > 0) iN = s;
+      else if (set_.species[s].baryon < 0) iNb = s;
+      else iPi = s;
+    }
+    long long a = 0, b = 0, pp = 0, pm = 0, nNb = 0, nN = 0, n0 = 0;
+    if (!tab_ok_) {
+      fail = "(B, Q) target has zero probability in the Poisson model";
+    } else {
+      const double r = rng.uniform();
+      std::size_t k = static_cast<std::size_t>(std::upper_bound(tab_cdf_.begin(), tab_cdf_.end(), r) - tab_cdf_.begin());
+      if (k >= tab_cdf_.size()) k = tab_cdf_.size() - 1;
+      nNb = tab_lo_ + static_cast<long long>(k);
+      nN = rep_.B_target + nNb;
+      if (!draw_charge_counts(rng, nN, nNb, mu_pi_ch_, rep_.Q_target, a, b, pp, pm)) fail = "charge target not reachable";
+      n0 = static_cast<long long>(rng.poisson(mu_pi_ch_));
+    }
+    if (fail.empty()) {
+      if (!run_species_n(iN, static_cast<std::uint64_t>(nN), rng, P, tl) || !run_species_n(iNb, static_cast<std::uint64_t>(nNb), rng, P, tl) ||
+          !run_species_n(iPi, static_cast<std::uint64_t>(pp + pm + n0), rng, P, tl))
+        fail = "candidate cap reached";
+    }
+    if (fail.empty()) {
+      trials_B = 1;
+      trials_label = 1;
+      lab.assign(P.size(), 0);
+      std::vector<std::size_t> gN, gNb, gPi;
+      for (std::size_t i = 0; i < P.size(); ++i) (P[i].baryon > 0 ? gN : (P[i].baryon < 0 ? gNb : gPi)).push_back(i);
+      auto shuffle = [&](std::vector<std::size_t>& v) {
+        for (std::size_t i = v.size(); i > 1; --i) std::swap(v[i - 1], v[rng.below(i)]);
+      };
+      shuffle(gN);
+      shuffle(gNb);
+      shuffle(gPi);
+      for (std::size_t i = 0; i < gN.size(); ++i) lab[gN[i]] = static_cast<long long>(i) < a ? 0 : 1;       // p, n
+      for (std::size_t i = 0; i < gNb.size(); ++i) lab[gNb[i]] = static_cast<long long>(i) < b ? 0 : 1;     // pbar, nbar
+      for (std::size_t i = 0; i < gPi.size(); ++i) lab[gPi[i]] = static_cast<long long>(i) < pp ? 0 : (static_cast<long long>(i) < pp + pm ? 2 : 1);  // pi+, pi-, pi0
+    }
   } else if (labelled) {
-    // baryon sector by whole-event rejection on the net baryon number, other species once
+    // reference method (sampler.global_method = rejection): baryon sector by whole-event rejection, pions once, label vector redrawn until Q = Q_target
     std::vector<Particle> trial;
     for (;;) {
       if (++trials_B > opt_.max_trials) { fail = "max_trials exceeded for the net baryon number"; break; }
@@ -294,6 +393,20 @@ SampleResult Sampler::sample(int sample_id) const {
     if (fail.empty())
       for (std::size_t s = 0; s < ns; ++s)
         if (set_.species[s].baryon == 0) run_species(s, rng, P, tl);
+    if (fail.empty()) {
+      lab.assign(P.size(), 0);
+      for (;;) {
+        ++trials_label;
+        long long q = 0;
+        for (std::size_t i = 0; i < P.size(); ++i) {
+          const auto& mem = set_.species[P[i].species].members;
+          lab[i] = static_cast<unsigned char>(rng.below(mem.size()));
+          q += mem[lab[i]].charge;
+        }
+        if (q == rep_.Q_target) break;
+        if (trials_label >= opt_.max_label_trials) { fail = "max_label_trials exceeded for the charge"; break; }
+      }
+    }
   } else {
     // generic species: joint rejection on (B, Q); the baryon sector is drawn first and a failed B check ends the trial (the sectors are independent)
     std::vector<Particle> trial;
@@ -310,30 +423,18 @@ SampleResult Sampler::sample(int sample_id) const {
     }
   }
 
-  // charge states of the isospin-summed species: independent uniform labels; in global mode the label vector is redrawn until Q = Q_target
+  // charge states of the isospin-summed species: poisson mode, independent uniform labels; global_B_Q: labels fixed above
   if (fail.empty() && labelled) {
-    std::vector<unsigned char> lab(P.size());
-    auto draw = [&]() {
-      long long q = 0;
-      for (std::size_t i = 0; i < P.size(); ++i) {
-        const auto& mem = set_.species[P[i].species].members;
-        lab[i] = static_cast<unsigned char>(rng.below(mem.size()));
-        q += mem[lab[i]].charge;
-      }
-      return q;
-    };
-    for (;;) {
-      ++trials_label;
-      const long long q = draw();
-      if (!global || q == rep_.Q_target) break;
-      if (trials_label >= opt_.max_label_trials) { fail = "max_label_trials exceeded for the charge"; break; }
+    if (!global) {
+      lab.assign(P.size(), 0);
+      for (std::size_t i = 0; i < P.size(); ++i) lab[i] = static_cast<unsigned char>(rng.below(set_.species[P[i].species].members.size()));
+      trials_label = 1;
     }
-    if (fail.empty())
-      for (std::size_t i = 0; i < P.size(); ++i) {
-        const Member& m = set_.species[P[i].species].members[lab[i]];
-        P[i].pdg = m.pdg;
-        P[i].charge = m.charge;
-      }
+    for (std::size_t i = 0; i < P.size(); ++i) {
+      const Member& m = set_.species[P[i].species].members[lab[i]];
+      P[i].pdg = m.pdg;
+      P[i].charge = m.charge;
+    }
   }
 
   R.ok = fail.empty();
@@ -360,7 +461,7 @@ SampleResult Sampler::sample(int sample_id) const {
   j["n_particles"] = P.size();
   j["counts"] = counts;
   j["sum"] = {{"E_GeV", E}, {"Px_GeV", px}, {"Py_GeV", py}, {"Pz_GeV", pz}, {"B", B}, {"Q", Q}};
-  j["targets"] = {{"B", rep_.B_target}, {"Q", rep_.Q_target}, {"conservation", opt_.conservation}};
+  j["targets"] = {{"B", rep_.B_target}, {"Q", rep_.Q_target}, {"conservation", opt_.conservation}, {"global_method", global ? opt_.global_method : std::string("none")}};
   nlohmann::json si = {{"B_all_elements", rep_.B_integral_all}, {"B_sampled_elements", rep_.B_integral_sampled}};
   nlohmann::json mm = {{"B", static_cast<double>(B) - rep_.B_integral_sampled}};
   if (surf_.meta.contains("integrals") && surf_.meta["integrals"].is_object()) {
@@ -386,6 +487,159 @@ SampleResult Sampler::sample(int sample_id) const {
                      {"acceptance_efficiency", global ? 1.0 / (static_cast<double>(std::max(1LL, trials_B)) * static_cast<double>(std::max(1LL, trials_label))) : 1.0}};
   R.summary = j;
   return R;
+}
+
+namespace {
+std::size_t draw_discrete(Rng& rng, const std::vector<double>& w) {
+  double tot = 0;
+  for (double x : w) tot += x;
+  const double r = rng.uniform() * tot;
+  double acc = 0;
+  std::size_t last = 0;
+  for (std::size_t i = 0; i < w.size(); ++i) {
+    if (w[i] <= 0.0) continue;
+    acc += w[i];
+    last = i;
+    if (r < acc) return i;
+  }
+  return last;
+}
+}  // namespace
+
+namespace {
+constexpr double kNegInf = -1e300;
+double log_pois(long long k, double mu) {
+  if (k < 0) return kNegInf;
+  if (mu <= 0.0) return k == 0 ? 0.0 : kNegInf;
+  return static_cast<double>(k) * std::log(mu) - mu - std::lgamma(static_cast<double>(k) + 1.0);
+}
+double log_binh(long long n, long long k) {
+  if (k < 0 || k > n) return kNegInf;
+  return std::lgamma(n + 1.0) - std::lgamma(k + 1.0) - std::lgamma(n - k + 1.0) - static_cast<double>(n) * std::log(2.0);
+}
+long long pois_window(double mu) { return static_cast<long long>(std::ceil(mu + 14.0 * std::sqrt(mu) + 30.0)); }
+// log pmf of S = pi+ - pi-, both Poisson(mu), for s = -J..J (index s + J)
+std::vector<double> log_skellam(double mu, long long J) {
+  std::vector<double> out(static_cast<std::size_t>(2 * J + 1), kNegInf);
+  for (long long sgn = -J; sgn <= J; ++sgn) {
+    double mx = kNegInf;
+    std::vector<double> t;
+    for (long long j = std::max(0LL, sgn); j <= J + std::max(0LL, sgn); ++j) {
+      const double l = log_pois(j, mu) + log_pois(j - sgn, mu);
+      t.push_back(l);
+      mx = std::max(mx, l);
+    }
+    if (mx <= kNegInf) continue;
+    double sum = 0;
+    for (double l : t) sum += std::exp(l - mx);
+    out[static_cast<std::size_t>(sgn + J)] = mx + std::log(sum);
+  }
+  return out;
+}
+// log pmf of U = a - b, a ~ Bin(nN, 1/2), b ~ Bin(nNb, 1/2); index u + nNb
+std::vector<double> log_pU(long long nN, long long nNb) {
+  std::vector<double> out(static_cast<std::size_t>(nN + nNb + 1), kNegInf);
+  for (long long u = -nNb; u <= nN; ++u) {
+    double mx = kNegInf;
+    std::vector<double> t;
+    for (long long b = std::max(0LL, -u); b <= nNb && u + b <= nN; ++b) {
+      const double l = log_binh(nN, u + b) + log_binh(nNb, b);
+      t.push_back(l);
+      mx = std::max(mx, l);
+    }
+    if (mx <= kNegInf) continue;
+    double sum = 0;
+    for (double l : t) sum += std::exp(l - mx);
+    out[static_cast<std::size_t>(u + nNb)] = mx + std::log(sum);
+  }
+  return out;
+}
+double log_sum_exp(const std::vector<double>& v) {
+  double mx = kNegInf;
+  for (double x : v) mx = std::max(mx, x);
+  if (mx <= kNegInf) return kNegInf;
+  double s = 0;
+  for (double x : v) s += std::exp(x - mx);
+  return mx + std::log(s);
+}
+std::size_t draw_log_discrete(Rng& rng, const std::vector<double>& lw) {
+  double mx = kNegInf;
+  for (double x : lw) mx = std::max(mx, x);
+  std::vector<double> w(lw.size());
+  for (std::size_t i = 0; i < lw.size(); ++i) w[i] = lw[i] <= kNegInf ? 0.0 : std::exp(lw[i] - mx);
+  return draw_discrete(rng, w);
+}
+}  // namespace
+
+bool draw_charge_counts(Rng& rng, long long nN, long long nNb, double mu, long long Q, long long& a, long long& b, long long& pp, long long& pm) {
+  const long long J = pois_window(mu);
+  const std::vector<double> lS = log_skellam(mu, J), lU = log_pU(nN, nNb);
+  std::vector<double> lw(lU.size(), kNegInf);
+  bool any = false;
+  for (long long u = -nNb; u <= nN; ++u) {
+    const long long s = Q - u;
+    if (s < -J || s > J) continue;
+    const double l = lU[static_cast<std::size_t>(u + nNb)] + lS[static_cast<std::size_t>(s + J)];
+    lw[static_cast<std::size_t>(u + nNb)] = l;
+    any = any || l > kNegInf;
+  }
+  if (!any) return false;
+  const long long u = static_cast<long long>(draw_log_discrete(rng, lw)) - nNb, s = Q - u;
+  std::vector<double> la(static_cast<std::size_t>(nN) + 1, kNegInf);
+  for (long long i = 0; i <= nN; ++i) {
+    const long long j = i - u;
+    if (j >= 0 && j <= nNb) la[static_cast<std::size_t>(i)] = log_binh(nN, i) + log_binh(nNb, j);
+  }
+  a = static_cast<long long>(draw_log_discrete(rng, la));
+  b = a - u;
+  std::vector<double> lp(static_cast<std::size_t>(J + std::max(0LL, s)) + 1, kNegInf);
+  for (long long j = std::max(0LL, s); j < static_cast<long long>(lp.size()); ++j) lp[static_cast<std::size_t>(j)] = log_pois(j, mu) + log_pois(j - s, mu);
+  pp = static_cast<long long>(draw_log_discrete(rng, lp));
+  pm = pp - s;
+  return true;
+}
+
+void Sampler::build_exact_table() {
+  // Accepted numbers are Poisson: nucleons Abar_N, antinucleons Abar_Nbar, charged pions Abar_pi/3 per state. P(nNb | B, Q) ~ Pois(B + nNb; Abar_N) Pois(nNb; Abar_Nbar) G(nNb),
+  // G = P(Q | nN, nNb) = Sum_s Skellam(s) P(a - b = Q - s). nNb runs over a window of the Poisson law (mean + 14 sigma + 30, probability left outside < 1e-40).
+  std::size_t iN = 0, iNb = 0, iPi = 0;
+  for (std::size_t s = 0; s < set_.species.size(); ++s) {
+    if (set_.species[s].baryon > 0) iN = s;
+    else if (set_.species[s].baryon < 0) iNb = s;
+    else iPi = s;
+  }
+  const double AN = acc_tot_[iN], ANb = acc_tot_[iNb];
+  mu_pi_ch_ = acc_tot_[iPi] / 3.0;
+  spmf_J_ = pois_window(mu_pi_ch_);
+  spmf_ = log_skellam(mu_pi_ch_, spmf_J_);
+  const long long B = rep_.B_target, Q = rep_.Q_target;
+  tab_lo_ = std::max(0LL, -B);
+  const long long hi = std::max(tab_lo_, pois_window(ANb));
+  std::vector<double> lw(static_cast<std::size_t>(hi - tab_lo_ + 1), kNegInf);
+  for (long long nb = tab_lo_; nb <= hi; ++nb) {
+    const long long nn = B + nb;
+    const double lp = log_pois(nn, AN) + log_pois(nb, ANb);
+    if (lp <= kNegInf) continue;
+    const std::vector<double> lU = log_pU(nn, nb);
+    std::vector<double> t;
+    for (long long sgn = -spmf_J_; sgn <= spmf_J_; ++sgn) {
+      const long long u = Q - sgn;
+      if (u < -nb || u > nn) continue;
+      const double l = spmf_[static_cast<std::size_t>(sgn + spmf_J_)] + lU[static_cast<std::size_t>(u + nb)];
+      if (l > kNegInf) t.push_back(l);
+    }
+    const double lg = log_sum_exp(t);
+    if (lg > kNegInf) lw[static_cast<std::size_t>(nb - tab_lo_)] = lp + lg;
+  }
+  const double lt = log_sum_exp(lw);
+  tab_cdf_.assign(lw.size(), 0.0);
+  tab_ok_ = lt > kNegInf;
+  if (!tab_ok_) return;
+  double acc = 0;
+  for (std::size_t i = 0; i < lw.size(); ++i) {
+    acc += lw[i] <= kNegInf ? 0.0 : std::exp(lw[i] - lt);
+    tab_cdf_[i] = acc;
+  }
 }
 
 std::vector<SampleResult> Sampler::sample_all(int n) const {
