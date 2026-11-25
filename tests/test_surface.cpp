@@ -685,16 +685,25 @@ TEST_CASE("T10a.6 backend reference: identical element lists to rounding") {
   REQUIRE(rv.size() >= 3);
   const long ref_nini = static_cast<long>(rv[0]);
   std::vector<double> refel(rv.begin() + 3, rv.end());
-  // order of both lists by (t, x, y, z) rounded to 1e-8 fm: the file order sorts on the exact values, and many elements share t = t_n + dt / 2
-  // up to rounding, so rounding differences between backends can permute them
-  auto keyed = [](const std::vector<double>& v) {
+  // order of both lists by the lattice cell of the element (time step, ix, iy, iz: the centroid lies inside its hypercube, so these integers do
+  // not depend on rounding), then by the exact values; the file order sorts on the exact values only, and rounding differences between backends
+  // can permute elements whose leading values agree to rounding
+  const double dtl = h.dt(), dxl = h.grid.dx, t0l = ti;
+  const auto orgl = centred_origin(h.grid);
+  auto keyed = [&](const std::vector<double>& v) {
     const size_t m = v.size() / kSurfRecord;
+    std::vector<std::array<long, 4>> key(m);
+    for (size_t r = 0; r < m; ++r) {
+      const double* q = &v[r * kSurfRecord];
+      key[r] = {static_cast<long>(std::floor((q[0] - t0l) / dtl)), static_cast<long>(std::floor((q[1] - orgl[0]) / dxl)),
+                static_cast<long>(std::floor((q[2] - orgl[1]) / dxl)), static_cast<long>(std::floor((q[3] - orgl[2]) / dxl))};
+    }
     std::vector<size_t> idx(m);
     for (size_t r = 0; r < m; ++r) idx[r] = r;
-    auto key = [&](size_t r, int q) { return std::llround(v[r * kSurfRecord + q] * 1e8); };
     std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
-      for (int q = 0; q < 4; ++q)
-        if (key(a, q) != key(b, q)) return key(a, q) < key(b, q);
+      if (key[a] != key[b]) return key[a] < key[b];
+      for (int q = 0; q < kSurfRecord; ++q)
+        if (v[a * kSurfRecord + q] != v[b * kSurfRecord + q]) return v[a * kSurfRecord + q] < v[b * kSurfRecord + q];
       return false;
     });
     std::vector<double> out(v.size());
@@ -722,8 +731,10 @@ TEST_CASE("T10a.6 backend reference: identical element lists to rounding") {
               "max|a-b|/max|col| = %.3e (column %d); initial slice totals vs reference: E %.3e B %.3e\n",
               runtime_info()["execution_space"].get<std::string>().c_str(), n, nr, nini, ref_nini, worst, worst_col,
               ini_E / rv[1] - 1.0, ini_B / rv[2] - 1.0);
-  std::remove("wp10a_backend.surface.bin");
-  std::remove("wp10a_backend.surface.json");
+  if (n == nr && worst <= 1e-10) {  // kept for inspection otherwise
+    std::remove("wp10a_backend.surface.bin");
+    std::remove("wp10a_backend.surface.json");
+  }
   CHECK(n == nr);
   CHECK(nini == ref_nini);
   CHECK(worst <= 1e-10);
