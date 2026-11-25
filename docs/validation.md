@@ -1450,3 +1450,11 @@ Wall time per event (cpu-openmp, 16 threads, macOS arm64), seconds. fluid = `wal
 | maxwell | 14.3 | 2.40 | 2.54 | 0.99 | 0.0050 | 1195347 | 148 - 156 MB |
 
 S24 costs 1.5 s per event (1.2e6 elements, 16 threads) in the preparation; the 10 samples take 5 ms. The surface files are deleted after both rules have been sampled; production runs sample in place (`docs/particlisation_format.md`, Sect. 3.1).
+
+**Full test suite.**
+
+| id | test | measured | tolerance | pass | backend |
+|---|---|---|---|---|---|
+| G5.ctest | `ctest --preset cpu-serial` (spf_tests, spf_info) at the commit of this section | 2 of 2 passed; spf_tests 128 test cases passed, 823495 assertions, 823479 passed, 16 failed (all inside test cases declared `may_fail` / `should_fail`: T4.1, T4.2, T4.4, T4.5, T4.5b, T8.5b, T10a.1, T10a.4, T10a.5; unchanged from the branches) | 0 unexpected failures | pass | cpu-serial |
+| G5.ctest | `ctest --preset cpu-openmp`, OMP_NUM_THREADS = 16 | 2 of 2 passed; same counts (128 test cases, 823495 assertions, 16 failed in declared expected-failure cases) | 0 unexpected failures | pass | cpu-openmp |
+| G5.ctest | `ctest --preset cuda-turing75` on the GPU node, and the end-to-end run there | **not run: the GPU job was not approved in this session; to be run by the reviewer** (command: `docs/running_collisions.md` Sect. 1 for the build, then `tools/particlisation/g5_endtoend.sh build/cuda-turing75 <oscar> 0 5 10 16`) | - | not run | cuda-turing75 |
