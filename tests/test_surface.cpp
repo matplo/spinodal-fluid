@@ -623,12 +623,12 @@ TEST_CASE("T10a.5 isochronous surface of a state below eps_sw: same initial slic
   const IsoPair& P = iso_pair();
   CHECK(P.iso["closed"].get<bool>());
   CHECK(P.chr["n_elements_initial_slice"].get<long>() == P.iso["n_elements_initial_slice"].get<long>());
-  // The isochronous totals are the grid content itself: closure = - (removed by the vacuum cut) / initial.  Bound: baryon number to rounding
-  // (1e-12); energy to the representation of light-like cells, relative error per cell <= gamma_cap^2 x 1e-16 = 1e-8 (state_from_conserved).
+  // The isochronous totals are the grid content itself: closure = - (removed by the vacuum cut) / initial, to rounding (state_from_conserved
+  // reproduces T^{00} and N^0 of every cell, also of the dilute light-like cells at the vacuum fronts).
   const double E0 = jget(P.chr, "totals_initial_on_grid", "E_GeV"), B0 = jget(P.chr, "totals_initial_on_grid", "B");
-  CHECK(std::fabs(jget(P.chr, "closure", "E") + P.vac_E / E0) < 1e-8);
+  CHECK(std::fabs(jget(P.chr, "closure", "E") + P.vac_E / E0) < 1e-12);
   CHECK(std::fabs(jget(P.chr, "closure", "B") + P.vac_B / B0) < 1e-12);
-  CHECK(std::fabs(jget(P.chr, "totals_surface", "E_GeV") / P.grid_E - 1.0) < 1e-8);
+  CHECK(std::fabs(jget(P.chr, "totals_surface", "E_GeV") / P.grid_E - 1.0) < 1e-12);
   CHECK(std::fabs(jget(P.chr, "totals_surface", "B") / P.grid_B - 1.0) < 1e-12);
 }
 
@@ -789,3 +789,4 @@ TEST_CASE("T10a.7 spf_collide with particlisation: event ends when the surface i
   CHECK(tzero == 0);
   fs::remove_all(out);
 }
+

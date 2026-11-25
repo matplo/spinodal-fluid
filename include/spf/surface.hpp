@@ -187,14 +187,24 @@ struct StoreLevelK {
 };
 
 // Rest-frame state (eps, rho, u^i) of conserved values (R, M, E) with the pressure p0 alone, in a form that stays accurate when |M| -> E
-// (dilute matter moving at nearly the speed of light): the primitive recovery of the solver (recover_core) gives the pressure, then
-//   eps = ((E - |M|)(E + |M|) + E p) / (E + p),  gamma^2 = (E + p) / (eps + p),  u^i = M^i / sqrt((E + p)(eps + p)),  rho = R / gamma,
-// iterated with p = p0(eps, rho) to a fixed point.  With these values T^{00} = (eps + p) u0^2 - p = E and T^{0i} = M^i to rounding (the velocity
-// of the recovery alone loses all digits of 1 - v there).  Light-like cells (gamma above kSurfGammaCap, in particular |M| = E exactly, which the
-// E >= |M| limiter of the solver produces at vacuum fronts) cannot be represented by a finite four-velocity; they get gamma = kSurfGammaCap
-// along M and eps = (E + p) / gamma^2 - p, so that T^{00} = E still holds and |T^{0i}| = (E + p) v differs from |M| by O(E / gamma^2).
-// Returns the failure flag of the recovery, plus 4 if the light-like branch was used.
+// (dilute matter moving at nearly the speed of light).  The recovery equation of the solver, v (E + p0(eps, rho)) = |M|, is solved for
+// w = 1 - v (bracketed regula falsi, Illinois variant):
+//   h(w) = (E - |M|) + p0 - w (E + p0) = 0,   eps = (E - |M|) + |M| w,   rho = R sqrt(w (2 - w)),   p0 = p0(eps, rho),
+// so that E - |M| enters directly and 1 - v keeps its digits; then gamma^2 = 1 / (w (2 - w)) and u^i = gamma (1 - w) M^i / |M|.  With these values
+// T^{00} = (eps + p0) u0^2 - p0 equals E up to gamma^2 times the residual of h, and the pressure is p0 of the stored (eps, rho) by construction.
+// h(0) = (E - |M|) + p0(E - |M|, 0) >= 0 and h(1) = -|M| < 0 bracket the root.  Light-like cells (root at gamma above kSurfGammaCap, in particular
+// |M| = E exactly, which the E >= |M| limiter of the solver produces at vacuum fronts) cannot be represented by a finite four-velocity: they get
+// gamma = kSurfGammaCap along M and eps = (E + p) / gamma^2 - p, so that T^{00} = E still holds and |T^{0i}| differs from |M| by a relative
+// O(1 / gamma^2).  Returns 4 if the light-like branch was used, 1 if h(0) < 0 (no bracket; the cell is then written at rest).
 inline constexpr Real kSurfGammaCap = 1.0e4;
+
+template <class EoS>
+KOKKOS_INLINE_FUNCTION Real surf_h(const EoS& eos, Real w, Real dm, Real Ma, Real E, Real Rp, Real& ee, Real& rr, Real& pp) {
+  ee = dm + Ma * w;
+  rr = Rp * Kokkos::sqrt(w * (2.0 - w));
+  pp = eos.p0(ee, rr);
+  return dm + pp - w * (E + pp);
+}
 
 template <class EoS>
 KOKKOS_INLINE_FUNCTION int state_from_conserved(const EoS& eos, Real R, Real Mx, Real My, Real Mz, Real E, Real& e, Real& rho, Real u[3]) {
@@ -202,57 +212,70 @@ KOKKOS_INLINE_FUNCTION int state_from_conserved(const EoS& eos, Real R, Real Mx,
   e = 0.0;
   rho = 0.0;
   if (!(E > 0.0)) return 0;
-  const Real Ma = Kokkos::sqrt(Mx * Mx + My * My + Mz * Mz);
-  Real c, p;
-  const int fl = recover_core(eos, R, Ma, E, 0.0, 0.0, e, rho, c, p, -1.0);
   const Real Rp = R > 0.0 ? R : 0.0;
-  if (!(E + p > 0.0)) {  // pressure of the table not above -E: matter at rest
+  Real Ma = Kokkos::sqrt(Mx * Mx + My * My + Mz * Mz);
+  if (Ma > E) Ma = E;  // the limiter rescales |M| to E; the square root of three components can exceed it in the last place
+  if (Ma == 0.0) {
     e = E;
     rho = Rp;
-    return fl;
+    return 0;
   }
-  const Real dm = E - Ma > 0.0 ? E - Ma : 0.0;
+  const Real dm = E - Ma;
   const Real g2cap = kSurfGammaCap * kSurfGammaCap;
-  bool light = false;
-  for (int it = 0; it < 60; ++it) {
-    const Real Ep = E + p;
-    e = (dm * (E + Ma) + E * p) / Ep;
-    const Real ep = e + p;
-    if (!(ep > 0.0) || Ep > g2cap * ep) { light = true; break; }
-    rho = Rp * Kokkos::sqrt(ep / Ep);
-    const Real pn = eos.p0(e, rho);
-    const Real d = Kokkos::fabs(pn - p);
-    p = pn;
-    if (d <= 1e-16 * Ep) break;
+  const Real w_cap = 1.0 / (g2cap * (1.0 + Kokkos::sqrt(1.0 - 1.0 / g2cap)));  // w (2 - w) = 1 / gamma_cap^2
+  Real ee, rr, pp;
+  const Real h0 = surf_h(eos, 0.0, dm, Ma, E, Rp, ee, rr, pp);
+  if (!(h0 >= 0.0)) {
+    e = E;
+    rho = Rp;
+    return 1;
   }
-  if (!light) {
-    const Real Ep = E + p;
-    e = (dm * (E + Ma) + E * p) / Ep;
-    const Real ep = e + p;
-    if (ep > 0.0 && Ep <= g2cap * ep) {
-      const Real s = 1.0 / Kokkos::sqrt(Ep * ep);
-      rho = Rp * Kokkos::sqrt(ep / Ep);
-      u[0] = Mx * s; u[1] = My * s; u[2] = Mz * s;
-      return fl;
+  Real a = w_cap, fa = surf_h(eos, a, dm, Ma, E, Rp, ee, rr, pp);
+  if (fa > 0.0) {
+    // root in (w_cap, 1): regula falsi (Illinois) on [a, b] with fa > 0 > fb
+    Real b = 1.0, fb = -Ma, w = a;
+    int side = 0;
+    for (int it = 0; it < 200; ++it) {
+      w = (a * fb - b * fa) / (fb - fa);
+      if (!(w > a && w < b)) w = 0.5 * (a + b);
+      const Real fw = surf_h(eos, w, dm, Ma, E, Rp, ee, rr, pp);
+      if (fw == 0.0 || (b - a) <= 4e-16 * b) break;
+      if (fw > 0.0) {
+        a = w; fa = fw;
+        if (side == 1) fb *= 0.5;
+        side = 1;
+      } else {
+        b = w; fb = fw;
+        if (side == -1) fa *= 0.5;
+        side = -1;
+      }
     }
+    // ee, rr, pp belong to the last w
+    e = ee;
+    rho = rr;
+    const Real g = 1.0 / Kokkos::sqrt(w * (2.0 - w));
+    const Real s = g * (1.0 - w) / Ma;
+    u[0] = Mx * s; u[1] = My * s; u[2] = Mz * s;
+    return 0;
   }
   // light-like branch: gamma = kSurfGammaCap
   rho = Rp / kSurfGammaCap;
-  p = eos.p0(0.0, rho);
-  for (int it = 0; it < 60; ++it) {
-    e = (E + p) / g2cap - p;
-    if (e < 0.0) e = 0.0;
-    const Real pn = eos.p0(e, rho);
+  Real p = eos.p0(0.0, rho), d_prev = 1e300;
+  for (int it = 0; it < 60; ++it) {  // e = (E + p) / gamma^2 - p, p = p0(e, rho); stopped when it no longer contracts
+    Real en = (E + p) / g2cap - p;
+    if (en < 0.0) en = 0.0;
+    const Real pn = eos.p0(en, rho);
     const Real d = Kokkos::fabs(pn - p);
+    if (!(d < d_prev)) break;
     p = pn;
-    if (d <= 1e-16 * (E + p)) break;
+    d_prev = d;
+    if (d <= 1e-15 * Kokkos::fabs(p) || d <= 1e-300) break;
   }
   e = (E + p) / g2cap - p;
   if (e < 0.0) e = 0.0;
-  const Real ug = Kokkos::sqrt(g2cap - 1.0);  // |u| = gamma v
-  const Real s = Ma > 0.0 ? ug / Ma : 0.0;
+  const Real s = Kokkos::sqrt(g2cap - 1.0) / Ma;
   u[0] = Mx * s; u[1] = My * s; u[2] = Mz * s;
-  return fl | 4;
+  return 4;
 }
 
 // Common record writer: 16 values at row r of the buffer.
