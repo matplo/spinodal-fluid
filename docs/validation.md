@@ -1173,3 +1173,129 @@ Maxwell curve:
 - N = 7: weighted linear slope 0.227 +- 0.020 per A GeV (P(slope > 0) = 1.000); mean(6) - mean(1) = 1.02 +- 0.10; P(strictly increasing at every step 1 -> 6) = 0.06.
 
 The Maxwell mean rises with energy over 1-6 A GeV (a statistically clear rise end to end), but it is not strictly monotonic: the 2 -> 3 and 5 -> 4 steps are within errors. The two-phase maximum is at 2 A GeV (grid), not at 3 A GeV as in the paper; 2 against 3 is resolved at 0.83 (N = 5) and 0.97 (N = 7) probability only. Systematics from resolution (S1) and the initial state (S2) are larger than the statistical error; the enhancement at dx = 0.1 fm is larger and the position of the maximum at that resolution has not been measured.
+
+
+## WP10a - switching (particlisation) surface (2026-11-25)
+
+Code: `include/spf/surface_geometry.hpp` (4D surface geometry), `include/spf/surface.hpp` (kernels, `SurfaceFinder`, file writer),
+`apps/spf_collide.cpp` (driver), `tests/test_surface.cpp` (T10a.0 - T10a.7, prefix `[WP10a]`), `tools/particlisation/` (reader, closure
+convergence, census). Format and construction: `docs/particlisation_format.md`; keys: decision S23. Backends: CPU = development machine (macOS
+arm64, `cpu-serial` and `cpu-openmp` with 16 threads), GPU = the GPU node (`cuda-turing75` Release, NVIDIA TITAN RTX). Unless a backend is named,
+a number was the same on all three to the digits shown (the printed lines of the tests are identical between Serial, OpenMP and CUDA except where
+listed).
+
+### Acceptance tests
+
+| test | measured | tolerance | CPU | GPU |
+|---|---|---|---|---|
+| T10a.0 random planes (500): angle between element normal and analytic normal | 2.1e-08 rad (CPU), 2.6e-08 rad (GPU; acos resolution near 1) | 1e-7 rad | pass | pass |
+| T10a.0 closed surfaces of random 8^4 fields: max abs(sum dSigma_mu) / sum abs(dSigma_mu); hypercubes with > 1 piece; topology errors | 2.3e-17 - 5.2e-17 (CPU), 6.0e-17 - 6.9e-17 (GPU); 342 - 385 (CPU) or 309 - 378 (GPU) hypercubes with up to 4 (CPU) or 5 (GPU) pieces (the random fields differ between the builds); 0 | 1e-13; > 0; 0 | pass | pass |
+| T10a.2a static sphere R = 3.5 fm, dx = 0.25 fm: area from the summed radial normal vs 4 pi R^2 | -1.61e-03 (153.6908 vs 153.9380 fm^2); sum dSigma_0 = 5e-19; spatial sum 3.9e-17 | 1e-2; 1e-12 | pass | pass |
+| T10a.2b sphere shrinking 4.5 -> 2.5 fm within one dt: sum dSigma_0 vs swept volume; summed radial normal vs analytic | -9.88e-04 (315.9414 vs 316.2537 fm^3); -1.42e-03 | 1e-2 | pass | pass |
+| T10a.3 slab moving with v = 0.5 along (1,2,2)/3: plane position, normal direction, u.dSigma (comoving faces), eps at the element, energy and momentum flux vs analytic | 8.9e-16 fm; 3.9e-15 (CPU), 4.3e-15 (GPU); 4.0e-15; 2.2e-16; 1.7e-14 (CPU), 1.8e-14 (GPU); 7.3e-15 | 1e-12 each | pass | pass |
+| T10a.4 Hubble expansion (p = eps/3, dx = 0.2 fm, 10 steps), fluid evolution: max abs(tau_element / tau_sw - 1) for r < 3 fm (rms) | 4.78e-04 (1.73e-04) | 2e-3 | pass | pass |
+| T10a.4 same, analytic levels (finder alone): position; largest angle dSigma_mu vs u_mu (weighted rms) | 1.28e-04 (9.9e-05); 1.26e-02 rad (1.6e-03) | 2e-3; 0.02 rad | pass | pass |
+| T10a.4 fluid evolution: largest angle dSigma_mu vs u_mu (weighted rms 9.5e-03 rad) | 2.27e-02 rad, at the apex of the hyperboloid (r = 0.35 fm) | 0.02 rad | **fail** (expected failure, kept) | **fail** (expected failure, kept) |
+| T10a.1 closure, Glauber-Gaussians, Pb+Pb 3 A GeV, box 24 fm, test table, gradient term on, dx = 0.2 fm: E, B | -1.345e-02, -1.287e-02 | 1e-3 | **fail** (expected failure, kept) | **fail** (expected failure, kept) |
+| T10a.1 closure, SMASH-like state (Glauber nucleons with momentum smearing plus pions), dx = 0.2 fm: E, B | -1.244e-02, -1.183e-02 (CPU); -1.242e-02, -1.182e-02 (GPU) | 1e-3 | **fail** (expected failure, kept) | **fail** (expected failure, kept) |
+| T10a.1 bookkeeping: surfaces complete, no cell at or above eps_sw on the box edge, 0 topology errors, 0 element recovery failures | all three runs | exact | pass | pass |
+| T10a.5 isochronous slice (8 fm/c, periodic box, dx = 0.4 fm): element totals vs grid content at that time; closure + vacuum-cut loss | E 4.4e-16 (Serial), 1.4e-15 (OpenMP), 2.2e-16 (CUDA); B 1.2e-14, 1.2e-15, 0; closure E +1.263e-07 and B -3.163e-06 are the vacuum-cut losses (-1.263e-07, +3.163e-06) with opposite sign | 1e-12 | pass | pass |
+| T10a.5 isoenergy vs isochronous totals, (iso - chr) / initial: E, B | -3.398e-02, -3.381e-02 | 1e-3 | **fail** (expected failure, kept: the closure error of T10a.1 at dx = 0.4 fm) | **fail** (expected failure, kept) |
+| T10a.6 backends: isoenergy elements of the first 3 steps (analytic state, dx = 0.8 fm, 2532 elements) vs the Serial reference `tests/data/wp10a_surface_reference.bin`: max abs(a-b) / max abs(column); initial-slice totals | Serial 0; OpenMP 0; CUDA 1.585e-08 (column u^1; same 2532 elements and 17144 initial-slice elements; summed baryon flux 2.0e-11, summed dSigma_0 6.3e-12); initial-slice totals 8e-15 / 1.8e-14 (OpenMP), 6.7e-15 / 1.9e-14 (CUDA) | 1e-10 | pass | count and initial slice: pass; element values: **fail** (expected failure on CUDA, `may_fail`) |
+| T10a.7 `spf_collide` with particlisation (Glauber-Gaussians, test table, dx = 0.5 fm): status, file size = 128 B x n_elements, sidecar keys, u.u = 1, initial-slice format, T > 0 on the surface | `fluid_end` after 6.80 fm/c, 64060 elements (34442 initial slice), 8.2 MB; max abs(u.u - 1)/u0^2 4.4e-16 (CPU), 5.6e-16 (GPU); 0 violations | exact / 1e-12 | pass | pass |
+
+Test totals at the branch head 602d66c: `ctest` passes on `cpu-serial` (634 s), `cpu-openmp` (563 s, 16 threads) and `cuda-turing75` on the GPU
+node (84 s; Release build 4 min 13 s). `spf_tests` has 106 test cases (12 of them WP10a, 593 assertions; 7 assertions fail on the CPU and 8 on
+CUDA, all inside the cases marked as expected failures above); on CUDA all 106 cases pass with 21669 assertions, 17 failing inside expected-failure
+cases of this and earlier packages.
+
+### Measurements behind the design choices (two attempts at T10a.1)
+
+* **Interpolation rule of the brief (u^mu, eps, rho linear to the centroid) fails in collision states.** Next to the surface there are cells with
+  `|M| -> E` (u^0 up to 1e7, produced by the `E >= |M|` limiter at the vacuum fronts); a linear interpolation of u^i carries their four-velocity into
+  the elements. Glauber-Gaussians, gradient term off, dx = 0.4 / 0.2 fm: closure of E +1.0e11 / +6.1e10 (at dx = 0.4 fm 4.7 % of the surface elements had u^0 > 2, up to 1.0e7). It is kept as
+  `particlisation.surface.interpolation = primitive`. First attempt: interpolate the conserved fields (default `conserved`), then recover
+  (Sect. 2.4 of `docs/particlisation_format.md`): -3.4e-2 / -1.4e-2.
+* **First time level.** Using the state after the removal of the initial slice as the lower level of the first step (`after_removal`) leaves the
+  surface at t_init half a cell inside the cells that were kept: closure -8.2e-2 / -4.1e-2 (dx = 0.4 / 0.2 fm) against -3.4e-2 / -1.4e-2 with
+  `before_removal` (default, second attempt; all gradient term off).
+* **Where the error is made.** Per step, (change of the content of the cells with eps >= eps_sw) + (surface flux) (Glauber-Gaussians, dx = 0.2 fm): the
+  mismatch accumulates to -5.8 GeV of 630 GeV during the first 0.96 fm/c and to -8.9 GeV in total (gradient term off, end 6.96 fm/c); it comes from the edge that the
+  removal of the initial slice leaves: dense matter next to vacuum rarefies over a few cells, and the linear interpolation in space and time
+  between full steps does not resolve it. The error is first order in dx with the removal and second order without it (keep):
+
+| variant | dx = 0.4 fm | 0.2 fm | 0.1 fm |
+|---|---|---|---|
+| `initial_slice = remove` (default): closure E / B | -3.398e-02 / -3.381e-02 | -1.345e-02 / -1.287e-02 | -4.853e-03 / -4.371e-03 (CPU), -4.852e-03 / -4.373e-03 (GPU) |
+| `initial_slice = keep`: closure E / B | -1.287e-02 / -1.118e-02 | -2.378e-03 / -1.482e-03 | +8.2e-05 / +4.05e-04 (CPU), +8.8e-05 / +4.08e-04 (GPU) |
+| `keep`: inflow part of E (elements with u.dSigma < 0, relative to the initial energy) | -0.11 | -0.15 | -0.17 |
+| `remove`: inflow part of E | -0.031 | -0.053 | -0.070 |
+
+(`tools/particlisation/closure_convergence.py`, Glauber-Gaussians, box 24 fm, test table, gradient term on; `tools/data/wp10a/closure_convergence_*.json`;
+CPU OpenMP and CUDA agree to the digits shown except where two values are given. dx = 0.1 fm: 9.12 million elements, 1.17 GB (remove), 12.0 million, 1.54 GB (keep); GPU wall time fluid / surface 80.6 / 19.6 s (remove).)
+With the gradient term off the closure at dx = 0.2 fm is -1.412e-02 / -1.369e-02 (the finite-range pressure is not part of `T^{mu nu}` of the
+format, but it is not what limits the closure). The target 1e-3 is reached at dx = 0.1 fm with `keep`, at the price of 15 % of the energy
+crossing the surface inwards (negative Cooper-Frye contributions), and is not reached with the default `remove` at any dx used here.
+
+### A7 - surface census (3 A GeV, events 0 - 19 of the pilot SMASH file, t_init = 10.48 fm/c, dx = 0.2 fm, box 38 x 38 x 34 fm)
+
+`config/collisions/{common,e3,t_init_fixed}.json` (+ `eps_sw_5.json`), finite-T tables two-phase and Maxwell (sha256 as in
+`docs/running_collisions.md`), CPU OpenMP (16 threads; the GPU job of this package reproduced event 0 of the two-phase, eps_sw = 4 run: 1218630
+elements, 54 steps, on both). The SMASH file is the 3 A GeV file of the Stage B pilot (seed 1, `--radius-mode fixed`, 50 events), whose first 20
+events are those of `gen_events.py --seed 1` (the GPU job regenerated 20 events with that command; t_init 10.481 fm/c). Reduction:
+`tools/particlisation/census.py`, figures `census_plot.py`; data `tools/data/wp10a/census.json`, `census_hist.npz`.
+
+| run | events | elements per event (initial slice) | file per event [MB] | fluid end after t_init [fm/c] | closure E | closure B | spline fraction, surface, E / B flux | spline fraction, initial slice, E / B flux | inflow share of surface E | wall fluid / surface per event [s] |
+|---|---|---|---|---|---|---|---|---|---|---|
+| two_phase_sw4 | 20 | 1.22e+06 +- 3.3e+04 (9.94e+05) | 156.5 +- 4.2 | 3.65 +- 0.38 | -6.50e-03 +- 5.2e-04 | -6.44e-03 +- 5.2e-04 | 0.968 / 0.962 | 0.287 / 0.294 | -0.001 | 14.1 / 2.1 |
+| maxwell_sw4 | 20 | 1.22e+06 +- 3.3e+04 (9.94e+05) | 156.6 +- 4.2 | 3.66 +- 0.42 | -6.40e-03 +- 5.3e-04 | -6.31e-03 +- 5.2e-04 | 0.969 / 0.963 | 0.287 / 0.294 | -0.001 | 13.6 / 2.1 |
+| two_phase_sw5 | 20 | 1.14e+06 +- 3.4e+04 (1.01e+06) | 145.8 +- 4.3 | 3.15 +- 0.38 | -6.33e-03 +- 5.5e-04 | -6.34e-03 +- 5.6e-04 | 1.000 / 1.000 | 0.377 / 0.386 | -0.001 | 11.4 / 1.8 |
+| maxwell_sw5 | 20 | 1.14e+06 +- 3.4e+04 (1.01e+06) | 146.0 +- 4.3 | 3.06 +- 0.37 | -6.25e-03 +- 5.6e-04 | -6.21e-03 +- 5.2e-04 | 1.000 / 1.000 | 0.377 / 0.386 | -0.001 | 10.7 / 1.7 |
+
+Mean +- standard deviation over the 20 events (initial slice: mean). Every event ended with status `fluid_end` (no event reached the 30 fm/c cap), 0 recovery failures, 0 cells at or above eps_sw on the box edge,
+0 element recovery failures. Spline fraction = fraction of the flux carried by elements with a(T) < rho < b(T), the matching densities of the
+two-phase construction (`TwoPhase.ab`, tabulated in `tools/particlisation/data/ab_two_phase.json`; the same a(T), b(T) are applied to the
+Maxwell runs, for comparison). Event-by-event ranges of the surface spline fraction (energy flux): 0.907 - 0.999 (two-phase, 4 eps_s),
+0.909 - 1.000 (Maxwell, 4 eps_s), 0.99998 - 1 (both, 5 eps_s). The energy flux of the census uses p0 from a bilinear interpolation of the table
+(the runs use bicubic): its surface totals agree with the sidecar totals to 4e-6 or better.
+
+* The surface lies at T = 100 - 140 MeV (most of the flux at 125 - 140 MeV) and rho = 2 - 4 rho_s (eps_sw = 4 eps_s) or 2.5 - 4.5 rho_s
+  (5 eps_s), i.e. almost entirely between a(T) and b(T): 96 - 97 % of the energy and baryon flux at 4 eps_s, all of it at 5 eps_s. The sampler
+  therefore has to treat spline-region elements as the normal case (decision S24).
+* The initial slice carries about 80 % of the elements (0.92 - 1.09 million per event) and 64 % (4 eps_s) or 73 % (5 eps_s) of the energy; 29 %
+  (4 eps_s) or 38 % (5 eps_s) of its energy lies in the spline region. Inflow (u.dSigma < 0) on the surface: 0.1 % of its energy flux.
+* Closure in these collision events: mean -6.2e-3 to -6.5e-3 for E and B, event range -7.9e-3 to -5.4e-3 (the target 1e-3 of T10a.1 is not
+  met here either).
+* Two-phase and Maxwell surfaces are almost identical in this census (same events, the difference in the evolution is small up to the fluid end).
+
+![census, energy flux](figures/wp10a_census_rho_T_E.png)
+
+![census, baryon flux](figures/wp10a_census_rho_T_B.png)
+
+![census, projections](figures/wp10a_census_projections.png)
+
+### A8 - cost (GPU, event 0 of the census, two-phase table, eps_sw = 4 eps_s, 190 x 190 x 170 cells, 54 steps to the fluid end at 4.32 fm/c)
+
+| run | wall total [s] | fluid steps [s] (per step) | observables [s] | surface finder [s] (initial slice + steps) | GPU memory (peak, nvidia-smi) | host RSS |
+|---|---|---|---|---|---|---|
+| particlisation on | 10.51 | 5.46 (0.101) | 1.92 | 0.71 + 1.35 | 3254 MiB | 380 MB |
+| particlisation off, same 54 steps | 15.56 | 11.90 (0.220) | 3.19 | - | 2042 MiB | 335 MB |
+
+The surface finder (extra primitive recovery, level copies, hypercube kernel, flux reduction, copy to the host, sorting, writing 156 MB) costs
+2.1 s per event, 20 % of the event. The run without particlisation is slower because the dilute fringe that the initial slice removes stays in
+the fluid (its primitive recovery with the table is expensive); with the removal those cells are vacuum. The surface adds 1.2 GiB of device memory
+(12 level fields of the padded grid and the element buffer of 1.23 million records). CPU (OpenMP, 16 threads, census): 11 - 14 s fluid and
+1.7 - 2.1 s surface per event (means of the four runs). Elements per event 1.09 - 1.28 million (of which 0.92 - 1.09 million initial slice), 139 - 164 MB per event.
+
+### Deviations from the brief (WP10a)
+
+* Interpolation to the element: the brief's rule (u^mu, eps, rho linear) is implemented as an alternative but the default interpolates the conserved
+  fields and recovers the state (measured above).
+* `particlisation.surface.isochronous_cells = all` (default) follows arXiv:1311.0999 (isochronous Cooper-Frye over all of space); the brief's
+  "cells with eps >= eps_sw" is the alternative `above_eps_sw`. With the brief's rule T10a.5 (a state below eps_sw) would have no elements.
+* Added keys not in the brief: `particlisation.initial_slice` (`remove`* / `keep`), `particlisation.surface.first_level`,
+  `particlisation.surface.interpolation`, `particlisation.surface.isochronous_cells`.
+* T10a.1 at dx = 0.1 fm and the variants are in the convergence tool, not in the unit tests (run time).
+* T10a.6 uses the analytic counter-streaming state (no atomic deposition); with the deposited Glauber state Serial and OpenMP elements differ by up
+  to 1.1e-8 (relative to the column maximum) because the initial fields already differ in the last bits.
+* The census used the 3 A GeV OSCAR file of the Stage B pilot (same seed and settings) and ran on the CPU.
