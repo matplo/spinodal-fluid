@@ -296,3 +296,10 @@ tools/particlisation/closure_convergence.py --exe build/cuda-turing75/spf_collid
 
 Disk: a 3 A GeV event at dx = 0.2 fm writes about 1.2 million elements, 156 MB (of which 80 % is the initial slice); `census.py --delete-bin`
 removes each file after reading it. Measured cost and memory: `docs/validation.md`, WP10a, A8.
+
+
+## 16. Particles from the surface (G5-INT)
+
+`spf_sample --surface event_NNN/event_NNN [--out DIR] sampler.n_samples=K sampler.mu_rule=rho_matched ...` converts the surface of one event into K OSCAR2013 particle lists (`docs/particlisation_format.md`, Sect. 4 - 5; keys in decision S24 - S30).
+`tools/particlisation/g5_endtoend.sh` runs the whole chain for events of the 3 A GeV file with both EoS tables and both mu rules; first numbers in `docs/validation.md` (G5-INT). Sample in place and delete the surface `.bin` afterwards (Sect. 8 of the format document).
+

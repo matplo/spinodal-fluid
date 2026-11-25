@@ -173,6 +173,8 @@ is about 150 MB (Sect. 7 of this document gives the measured size); run `spf_sam
   The mean field is w(rho) = rho (-A c + B c^2), c = rho/rho_s, dw/drho = -2 A c + 3 B c^2, with the constants of `eos2b.py` computed in the same way (T = 0 Fermi-gas binding energy E/A = e_kin0(rho)/rho - m_N,
   central differences with step 1e-4 fm^-3 at rho_s, K = 300 MeV: B = (K - 9 rho_s^2 d2)/18, A = rho_s d1 + 2B). Measured: A = 52.127066 MeV, B = 19.104872 MeV (relativistic constants, decision S13).
   The mean field is not a particle: the sampled kinetic energy density is eps - w(rho); see Section 4.7.
+  **Chemical potential (decision S24, `sampler.mu_rule`).** `rho_matched`\* solves, for every element, n_N(T, mu_kin) - n_Nbar(T, mu_kin) = rho with the species above (Brent, relative tolerance 1e-12; rho <= 0 solved with mu_kin <= 0, rho = 0 gives 0; T below `sampler.mu_T_floor_GeV` = 0.005 is solved and sampled at the floor and counted in the summary as `mu_rule_n_at_T_floor`; solver failure falls back to the table value, `mu_rule_n_solver_failed`).
+  `table` uses mu_kin = mu_B - dw/drho of the stored element. Reason: 97 - 100 % of the surface energy flux lies in the spline region (rho = 2 - 3.5 rho_s, T = 100 - 142 MeV) where the table rule does not reproduce rho (mismatch up to 67 %). Energy is not matched by either rule (Section 4.7).
 * `hrg` - every hadron of SMASH's `particles.txt` (`sampler.hrg_particles_file`; pole masses, widths ignored, resonances are left to SMASH to decay), quantum statistics (baryons Fermi-Dirac, mesons Bose-Einstein), mu = B mu_B (mu_Q = mu_S = 0).
   Degeneracy 2J+1 = last PDG digit, baryon number and charge from the PDG code (`pdg_baryon`, `pdg_charge`); antiparticles are added for all baryons and for all mesons with different flavour digits that are not listed; nuclei (|PDG| > 10^9) are skipped;
   `sampler.hrg_max_mass_GeV` > 0 drops heavier species.
@@ -221,7 +223,7 @@ panel edges at E = m + T t (t = 0 ... 50) and E = mu + T j (j = -30 ... 45, the 
 The surface file carries no phase flag. An element is **flagged as spline (two-phase interpolation) region** when the hadron gas of the stored (T, mu_B) does not reproduce the stored density,
 |n_N(T, mu_0) - n_Nbar(T, mu_0) - rho| > `spline_tol_rel` rho + `spline_tol_abs_fm3` (0.02, 1e-6 fm^-3), with mu_0 = mu_B - dw/drho(rho); on the lattice nodes of the hadron branch of the test table the left side is below 1.1e-7 rho.
 `use_table`\* uses the stored T and mu_B (every element is sampled; the count and baryon flux of the flagged elements are reported), `skip` leaves flagged elements out and reports their count, N^mu dSigma_mu and eps u^0 (u.dSigma)
-(the energy flux without the pressure term: the surface file has no p). Elements with T < `T_min_GeV` or without positive dSigma_max are skipped as cold and reported in the same fields. The reviewer decides the default after a surface census (decision S27).
+(the energy flux without the pressure term: the surface file has no p). Elements with T < `T_min_GeV` or without positive dSigma_max are skipped as cold and reported in the same fields. The default `use_table` was kept after the census; the census result is the reason for the S24 rule (Section 4.1), which makes the density of the sampled gas equal to the element's rho in the spline region as well, so that the flag only reports where the table's (T, mu_B) is not the gas value.
 
 ### 4.6 Positions, seeds, threads
 
@@ -244,13 +246,13 @@ whether SMASH's List modus of the version in use accepts a block with several ti
 Failed samples are omitted from the OSCAR file and flagged in the JSON.
 
 `<out>/<sampler.output_prefix>.json`: `preparation` (element counts, spline/cold elements and their fluxes, B_target, Q_target, expected number of candidates, `expected_accepted_per_species`, `expected_net_B_accepted`, `expected_negative_fraction_number`: the exact expected accepted numbers and negative fraction), timings, and `samples`: one summary per sample with
-`counts` (per species), `sum` (E, Px, Py, Pz, B, Q), `targets`, `surface_integrals`, `mismatch_sampled_minus_surface`, `negative_fraction`, `skipped`, `spline_region_flagged_elements`, `candidates_in_accepted_trial`, `efficiency`, `seed`, `ok`.
+`mu_rule_n_at_T_floor`, `mu_rule_n_solver_failed`, `mu_rule_max_rel_residual` (in `preparation`), `counts` (per species), `sum` (E, Px, Py, Pz, B, Q), `targets`, `surface_integrals`, `mismatch_sampled_minus_surface`, `negative_fraction`, `skipped`, `spline_region_flagged_elements`, `candidates_in_accepted_trial`, `efficiency`, `seed`, `ok`.
 `<out>/config_used.json`: effective configuration.
 
-## 6. Configuration keys (block `sampler`, `config/defaults.json`; default marked \* in the decision register, `docs/decisions_spinodal.md` S25 - S29)
+## 6. Configuration keys (block `sampler`, `config/defaults.json`; default marked \* in the decision register, `docs/decisions_spinodal.md` S24 - S30)
 
 `surface` (base path), `output_prefix`, `species`, `quantum_statistics` (true\*; false = Boltzmann), `nucleon_mass_GeV` 0.940, `pion_mass_GeV` 0.140, `mean_field_K_MeV` 300, `hrg_particles_file`, `hrg_max_mass_GeV`,
-`conservation`, `global_method`, `charge_Z`, `charge_A`, `spline_policy`, `spline_tol_rel`, `spline_tol_abs_fm3`, `T_min_GeV`, `position`, `sort_by_time`, `n_samples`, `seed`, `quad_nodes`, `max_trials`, `max_label_trials`, `threads`.
+`conservation`, `global_method`, `charge_Z`, `charge_A`, `mu_rule` (rho_matched\*, table), `mu_T_floor_GeV` (0.005), `spline_policy`, `spline_tol_rel`, `spline_tol_abs_fm3`, `T_min_GeV`, `position`, `sort_by_time`, `n_samples`, `seed`, `quad_nodes`, `max_trials`, `max_label_trials`, `threads`.
 
     spf_sample --surface <base> --out <dir> [--config file] [--override file] [sampler.key=value ...]
 
@@ -261,3 +263,9 @@ Failed samples are omitted from the OSCAR file and flagged in the JSON.
 2. The SMASH input file `particles.txt` was not available to this package; the `hrg` set is tested with a reduced file in the same layout.
 3. The energy flux of skipped elements is reported without the pressure term (the surface file has no p).
 4. Lattice spacing, time stepping and the sidecar keys other than those listed in Section 3.1 are not interpreted by the sampler.
+
+## 8. Run the whole chain (fluid, surface, particles)
+
+`tools/particlisation/g5_endtoend.sh BUILD_DIR OSCAR_FILE [FIRST N K THREADS]` runs `spf_collide` (surface on, `config/collisions/common.json`) for two EoS tables and `spf_sample` with both mu rules on the same surfaces; `tools/particlisation/g5_analyse.py ROOT --json OUT --fig OUT.png`
+reads the result (multiplicities, B and Q exactness, E and P balance, initial-slice fraction, timings, OSCAR2013 parse check). First measurement: `docs/validation.md`, G5-INT. A surface of a 3 A GeV event at dx = 0.2 fm has 1.2 million elements and is 148 - 156 MB.
+**Production runs must sample in place and not keep surfaces**: run `spf_sample` directly on the file written by `spf_collide` and delete `<base>.surface.bin` afterwards (keep the small `.surface.json` and the sampler output); the driver script deletes the `.bin` files after both mu rules have been sampled.

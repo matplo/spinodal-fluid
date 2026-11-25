@@ -247,7 +247,7 @@ MuSolve solve_mu_net_density(double m, double g, double T, double rho, Stat st, 
     if (fb == 0.0 || std::fabs(fb) <= rel_tol * target) break;
     if ((fb > 0) == (fc > 0)) { c = a; fc = fa; d = b - a; e = d; }
     if (std::fabs(fc) < std::fabs(fb)) { a = b; b = c; c = a; fa = fb; fb = fc; fc = fa; }
-    const double tol1 = 2.0 * 2.2e-16 * std::fabs(b) + 1e-16, xm = 0.5 * (c - b);
+    const double tol1 = 2.0 * 2.2e-16 * std::fabs(b) + 1e-300, xm = 0.5 * (c - b);
     if (std::fabs(xm) <= tol1) break;
     if (std::fabs(e) >= tol1 && std::fabs(fa) > std::fabs(fb)) {
       const double sdiv = fb / fa;

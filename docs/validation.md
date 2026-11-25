@@ -1389,3 +1389,64 @@ Samples per second (accepted samples / wall time of `sample_all`, one run each; 
 For comparison the first version (baryon-stage rejection with the pre-existing label rejection replaced by label draws) ran at 7.12 samples/s (1 thread) and 49.05 samples/s (16 threads) on the GPU node host and 33.23 / 277.54 samples/s on the Mac at B = 400 (see B8 above), and the full label rejection of the first version would have added a factor of about 4000 at B = 400.
 Preparation: 0.16 s (GPU node host, 1 thread; 0.04 s on the Mac) for 1e6 elements in blocks of identical state, 43.3 us (GPU node host) and 6.1 us (Mac) per element for distinct states, with the acceptance quadrature included only for space-like elements (the synthetic surface is time-like).
 Production cost per event at B about 400 on the GPU node host: about 8 ms (1 thread) for `global_B_Q` and 5 ms for the unconstrained poisson mode.
+
+## G5-INT - integration of the surface finder and the sampler, decision S24, first end-to-end test (2026-11-25)
+
+Branch `integrate-wp10` = main (v0.1.0) + `wp10a-surface` (b9d4725) + `wp10b-sampler` (0c59147), merge commits. Conflicts in `config/defaults.json`, `tests/CMakeLists.txt`, `docs/decisions_spinodal.md`,
+`docs/validation.md` and `docs/particlisation_format.md` were resolved by keeping both sides (the format document is one document: Sect. 1 - 3 surface, Sect. 4 - 7 sampler).
+
+**Key reconciliation.** The sampler's reader and the sidecar written by `spf_collide` were compared on a real file (3 A GeV event 0, dx = 0.4 fm, two-phase table, 149426 elements). The sampler reads
+`format_version` (1), `n_elements`, `dx_fm` (the reader accepts `dx` or `dx_fm`), `event_id` and, for the optional mismatch report, the surface integrals. The 16-float64 element layout is identical in writer and reader (file size = 128 n_elements, checked at every load).
+One key was renamed: the sampler read the surface integrals from `integrals` = {`E`, `Px`, `Py`, `Pz`, `B`}, which `spf_collide` does not write; it writes `totals_all_elements` = {`E_GeV`, `Px_GeV`, `Py_GeV`, `Pz_GeV`, `B`}.
+The sampler now reads `totals_all_elements` and falls back to `integrals`. Before the fix the per-sample report `surface_integrals` / `mismatch_sampled_minus_surface` had no energy and momentum entries for real files; after it, they are filled. No other key differs.
+
+**Charge-label acceptance at B = 88, Q = 35 (WP10b B6 row and R1 below).** 0.0226 is the value of the first-version run (baryon-stage and label rejection, 600 samples) committed with the first-version documentation (commit ededa07).
+0.0219 was printed by a later run; it is not recorded in any committed file or log of the repository and was not reproduced here (the default method is now `exact_counts`, whose acceptance efficiency is 1 by construction; the B6 test prints 1.0000).
+With 600 accepted samples the statistical relative uncertainty of such an acceptance ratio is about 1/sqrt(600) = 4 %, i.e. 0.0226 +- 0.0009: the two numbers agree within it. The number to quote is 0.022 +- 0.001 (rejection reference method); the B6 row keeps 0.0226 as the value of the recorded run.
+
+### Decision S24 (`sampler.mu_rule`)
+
+`rho_matched` (default): per element, T from the table, mu_kin from n_N(T, mu_kin) - n_Nbar(T, mu_kin) = rho with the sampler's own species (g = 4, Fermi-Dirac, m = 0.940 GeV); Brent's method bracketed from the table value, relative tolerance 1e-12 on |net - rho| / |rho|.
+rho < 0 is solved for |rho| and the sign of mu_kin follows rho; rho = 0 gives mu_kin = 0; T below `sampler.mu_T_floor_GeV` (0.005 GeV) is solved and sampled at the floor and counted (`mu_rule_n_at_T_floor`); a failed bracket falls back to the table mu_kin and is counted (`mu_rule_n_solver_failed`, 0 in all runs below).
+Pions mu = 0 at the same T. `table` is the WP10b rule. Not applied to `species = hrg`. Energy is not matched (the mean-field and gradient energy has no particle counterpart); it is reported below, not corrected.
+
+| id | test | measured | tolerance | pass | backend |
+|---|---|---|---|---|---|
+| S24a | max relative difference of mu_kin, rho_matched against table rule, hadron-branch lattice nodes (5,12), (6,12), (14,30) of `data/eos/test/eos_two_phase_test` (T = 41, 105, 88 MeV): 1.55e-09, 9.94e-10, 1.17e-08 | 1.175e-08 | 1e-6 | pass | cpu-serial |
+| S24b | max abs(n_kin / rho - 1), rho_matched: 154 states T = 100 ... 142 MeV (step 2 MeV, includes 136 - 142), rho = 2 ... 3.5 rho_s (step 0.25), table mu_B set to 0.95 GeV (not a table value; the table rule on the same inputs gives a mismatch of 4.09) | 8.7e-13 | 1e-10 | pass | cpu-serial |
+| S24b | same, 81 states T = 10 ... 200 MeV, rho = 0.01 ... 6 rho_s | 9.6e-13 | 1e-10 | pass | cpu-serial |
+| S24 | rho = -0.01 gives mu < 0 with residual < 1e-10; rho = 0 gives mu = 0; T = 10 MeV with floor 20 MeV is solved at the floor and counted once; no solver failure | as stated | - | pass | cpu-serial |
+| S24c | global_B_Q (`exact_counts`) against brute-force conditioned Poisson sampling (B_target 9, Q_target 5; 24000 samples against 7038 accepted of 480000), rho_matched, table mu_B 100 MeV away from the rho-consistent value: smallest multiplicity chi2 p / smallest |p| KS p over 7 species | 0.109 / 0.088 (identical to the run of the previous section: the sampled state does not depend on mu_B) | > 0.01 | pass | cpu-serial |
+
+Notes. (i) The default is now `rho_matched`, so four WP10b tests (B2, B3, B4 and the expected-accepted-number test) that fed the sampler a state with rho = 0.1 fm^-3 inconsistent with their kinetic mu_0 now build rho from (T, mu_0) (`net_nucleon_density` in `tests/test_sampler.cpp`); their reference values and tolerances are unchanged (a change of the input state, not of a tolerance).
+(ii) Precision limit: the relative residual is below 1e-12 over the census range, but for |rho| below about 1e-6 of n_N(T, 0) the difference n(mu) - n(-mu) is limited by double-precision cancellation. The largest relative residual over all elements of the ten surfaces below is 3.7e-11, from such nearly empty elements (single-element probe at T = 100 MeV: rho = 1e-12 gives 1e-8, rho = 1e-8 gives 8e-12, rho = 1e-3 gives 4e-16).
+
+### End-to-end: fluid -> surface -> particles (first measurement)
+
+Setup: 3 A GeV, events 0 - 4 of the Stage B pilot SMASH file (`gen_events.py` seed 1, `--radius-mode fixed`; file `smash/e3/smash_data/particle_lists.oscar` of the pilot archive), `config/collisions/{common,e3,t_init_fixed}.json`, dx = 0.2 fm, R = 6.62 fm start (t_init = 10.481 fm/c), eps_sw = 4 eps_s,
+tables `table_two_phase` and `table_maxwell` (SHA-256 as in `docs/running_collisions.md`, checked), `spf_sample` with `species = eos_consistent`, `conservation = global_B_Q`, `global_method = exact_counts`, K = 10 samples per event, 16 threads. Driver `tools/particlisation/g5_endtoend.sh`, analysis `tools/particlisation/g5_analyse.py`, numbers `tools/data/g5/g5_endtoend_cpu.json`, figure `docs/figures/g5_endtoend_spectra.png`.
+**Backend of this measurement: cpu-openmp, macOS arm64, 16 threads. The run on the GPU node was not carried out (the job submission was not approved in this session); the numbers are therefore CPU numbers and the wall times are CPU wall times.**
+Mean multiplicity per sample (50 samples = 5 events x 10, +- standard error over samples), E_particles / E_surface, P_x and P_z of the particles minus the surface integral (GeV, per sample, mean +- standard error, rms), fraction of particles whose time equals t_init (initial-slice elements), fraction of samples with B and Q exact:
+
+| EoS | mu rule | p | n | pbar | nbar | pi+ | pi- | pi0 | E_particles / E_surface | P_x diff | P_z diff | from initial slice | B / Q exact |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| two_phase | rho_matched | 184.12 +- 0.99 | 227.68 +- 0.99 | 0.00 +- 0.00 | 0.00 +- 0.00 | 37.94 +- 0.86 | 60.06 +- 1.10 | 45.66 +- 0.95 | 0.9459 +- 0.0020 | -1.13 +- 1.65 (rms 11.6) | -3.50 +- 1.98 (rms 14.3) | 0.670 | 1 / 1 |
+| two_phase | table | 184.12 +- 0.99 | 227.68 +- 0.99 | 0.00 +- 0.00 | 0.00 +- 0.00 | 37.94 +- 0.86 | 60.06 +- 1.10 | 45.66 +- 0.95 | 0.9643 +- 0.0018 | -3.15 +- 1.54 (rms 11.2) | -2.06 +- 2.27 (rms 16.0) | 0.721 | 1 / 1 |
+| maxwell | rho_matched | 184.14 +- 0.99 | 227.66 +- 0.99 | 0.00 +- 0.00 | 0.00 +- 0.00 | 37.98 +- 0.86 | 60.12 +- 1.10 | 45.68 +- 0.95 | 0.9475 +- 0.0020 | +0.21 +- 1.54 (rms 10.8) | +0.05 +- 2.12 (rms 14.9) | 0.673 | 1 / 1 |
+| maxwell | table | 184.14 +- 0.99 | 227.66 +- 0.99 | 0.00 +- 0.00 | 0.00 +- 0.00 | 37.98 +- 0.86 | 60.12 +- 1.10 | 45.68 +- 0.95 | 0.9654 +- 0.0020 | -0.51 +- 1.60 (rms 11.2) | -2.17 +- 2.30 (rms 16.2) | 0.719 | 1 / 1 |
+
+Surface integrals: E = 636.7 - 637.4 GeV per event; the surface momenta are P_x = -0.05 ... 0.16 GeV and P_z = -0.58 ... 0.18 GeV (centre-of-mass frame), so a ratio P_particles / P_surface is undefined and the differences are given instead. Closure of the fluid stage (E, B): -0.6 % to -0.8 % for every event (declared expected failure of the surface branch at dx = 0.2 fm, T10a.1).
+B_target is 407 - 411 per event. Antinucleons: 0.00 per sample at the printed precision. Because B and Q are exact and the pion means do not depend on mu_kin, the multiplicities of the two rules agree; the mu rule changes the spectra and the energy:
+E_particles / E_surface = 0.946 (two-phase) and 0.948 (Maxwell) with rho_matched, 0.964 and 0.965 with the table rule. The shortfall of 3.5 - 5.4 % is the mean-field (and gradient) energy that has no particle counterpart; it is reported, not corrected.
+P_x and P_z differences are compatible with zero within about 1.5 - 2 standard errors except two-phase / rho_matched P_z (-3.5 +- 2.0) and two-phase / table P_x (-3.2 +- 1.5); the rms over samples (11 - 16 GeV) is the fluctuation of an event of about 556 particles.
+About 67 - 72 % of the sampled particles come from the initial slice (cells with eps < eps_sw at t_init, 78 - 83 % of the elements), the rest from the evolving surface. About 6e4 elements per event lie at T < 5 MeV and are solved at the temperature floor (rho_matched only).
+The OSCAR2013 output of every sample was parsed by `g5_analyse.py` (header `#!OSCAR2013`, one block per sample, the particle count declared in `# event k ensemble 0 out n` equals the number of particle lines and `n_particles` of the JSON, 12 columns per line): all 20 files (5 events x 2 EoS x 2 rules, 10 blocks each) pass. SMASH reading is the next package.
+
+Wall time per event (cpu-openmp, 16 threads, macOS arm64), seconds. fluid = `wall_total_s` minus surface; surface = `wall_surface_begin_s` + surface finder; sampling = `spf_sample` for K = 10 samples including reading the file and the preparation, last column the 10 samples alone:
+
+| EoS | fluid | surface | spf_sample, rho_matched | spf_sample, table | 10 samples only | elements per event | surface file |
+|---|---|---|---|---|---|---|---|
+| two_phase | 15.3 | 2.44 | 2.60 | 0.98 | 0.0052 | 1195389 | 148 - 156 MB |
+| maxwell | 14.3 | 2.40 | 2.54 | 0.99 | 0.0050 | 1195347 | 148 - 156 MB |
+
+S24 costs 1.5 s per event (1.2e6 elements, 16 threads) in the preparation; the 10 samples take 5 ms. The surface files are deleted after both rules have been sampled; production runs sample in place (`docs/particlisation_format.md`, Sect. 3.1).
