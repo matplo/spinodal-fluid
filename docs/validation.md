@@ -1221,3 +1221,47 @@ Observations.
 4. **Preparation and sampling cost.** The element table is built once per surface; consecutive elements with identical (T, mu_B, rho) share the thermal integrals (the synthetic surface of B8 is built in blocks: preparation 0.01 s); with distinct states it is 6.1 us per element on the Mac (1 thread) and 42.2 us per element on the GPU node (1 thread, serial build).
    The speed-up from 1 to 16 threads is 8.4 (Mac, cpu-serial build), 5.7 (Mac, cpu-openmp build) and 6.9 (GPU node); the timings of single runs vary by tens of percent.
 5. **hrg set.** Not tested against SMASH's own `particles.txt`, see `docs/particlisation_format.md`, Section 5.
+
+
+## WP10b follow-up - exact (B, Q) conditioning without rejection and global_B_Q timing (2026-11-25)
+
+Review items R1 (charge-label rejection stage, production events B about 400) and R2 (timing of global_B_Q and poisson at 1e6 elements). The sections above (B6, B8 of the first version) are kept as the record of the first version (baryon-stage rejection and label rejection); the numbers below supersede them for the default
+`sampler.global_method = exact_counts` (decision S30). Full suite: cpu-serial 2 of 2 passed, Release cuda-turing75 on the GPU node 2 of 2 passed (commit e1b3711; sampler subset 20 test cases, 803722 assertions, 0 failed). Method: `docs/particlisation_format.md`, Section 2.4.
+
+**R1. What was found.**
+
+1. *Acceptance of the first version (reference method `rejection`, B8-type surface of 1e5 elements, 100 temperature blocks).* Baryon stage (samples/trials): B_target = 100: 200/4834 = 0.0414; 200: 200/6628 = 0.0302; 400: 60/2382 = 0.0252 (estimate 1/sqrt(2 pi (N+Nbar)): 0.0399, 0.0282, 0.0199). All are above 1 %.
+   **Charge-label stage**: 1.57e-02 (B = 100, Q = 39), 3.61e-03 (200, 79), 2.45e-04 (400, 158) (12756, 55398, 245216 label draws for 200, 200, 60 samples). The product is about 6e-6 at B = 400. The cause is that Z/A = 82/208 = 0.394 differs from the isospin-symmetric mean 1/2: for 400 baryons the proton number must be 4 standard deviations below its mean, which independent labels reach with a probability of order 1e-4.
+   The first-version number of 0.0226 for the label stage at B = 88 (Q = 35) was a milder case of the same effect.
+2. *The suggested remedy (draw the charge states given the sampled numbers of nucleons, antinucleons and pions, with the conditional law given Q) is exact for the labels but not for the event.* Conditioning on Q also changes the distribution of the numbers (the probability of Q given the counts depends on the pion number through the variance, and on the antinucleon number).
+   It was implemented first (sequential conditional counts, no rejection) and tested against the poisson mode conditioned on (B, Q) by brute-force rejection on a small system (B_target 9, Q_target 5; 1768 accepted brute-force events): the charge-state multiplicities disagreed, pi+ chi2 p = 9.6e-5 and pi- p = 4.0e-3 (the label vector itself was exact: chi2 p = 0.912 against brute force at fixed counts). This variant was not kept.
+3. *Implemented: Poisson process conditioned on (B, Q) through the numbers, no rejection* (`exact_counts`, default). The accepted numbers of the charge states are independent Poisson variables with means from the exact expected accepted numbers Abar_s (quadrature with a closed-form angular average); the antinucleon number is drawn from its exact conditional law given (B, Q),
+   the charge counts are drawn from their exact conditional law, then exactly that many accepted particles are generated per group. Acceptance 1; unbiased up to the truncation windows (probability below 1e-40).
+   A rejection scheme on the counts with weights P(Q | counts) was considered and not used: the weight is of order 1e-4 and the rigorous bound on it is attained in the tail of the pion number, so the efficiency would remain a few per cent at best.
+
+**R1. Tests (all pass).**
+
+| Test | Measured | Criterion |
+|---|---|---|
+| closed-form angular average: expected accepted numbers against the Monte Carlo (poisson mode, 4000 samples) for six element types (static / boosted time-like, space-like with d0 = 0, > 0, < 0, time-like with d0 < 0) | worst deviation 2.10 sigma over 18 comparisons (e.g. static time-like N 21.9490 vs 21.9821, boosted 27.3888 vs 27.4776, space-like d0 = 0: 1.8750 vs 1.8740); exact negative fraction 0.5000 for d0 = 0, 0 for time-like, 0.9965 for the moving element with d0 < 0 | 3.5 sigma; 0.5 to 1e-12 |
+| conditional charge counts at fixed (nN, nNb) = (5, 2), charged pions Poisson(1.3) per state, Q = 3: 400000 exact draws against 886435 brute-force accepted of 6e6 | 103 cells, chi2 homogeneity p = 0.752 (79 dof) | p > 0.01 |
+| global_B_Q against the poisson mode conditioned on (B, Q) by brute force, small system (B_target 9, Q_target 5; 24000 exact samples against 7038 accepted of 480000, acceptance 0.0147): charge-state multiplicity histograms and |p| spectra of p, n, pbar, nbar, pi+, pi0, pi- | chi2 p: 0.347, 0.610, 0.109, 0.754, 0.705, 0.198, 0.715; KS p: 0.726, 0.370, 0.277, 0.088, 0.130, 0.675, 0.259 (smallest 0.109 and 0.088) | p > 0.01 |
+| exact_counts against the rejection reference at B_target 88, Q_target 35 (1500 samples each): mean yields of the 7 species | worst 1.51 sigma (pbar) | 3.5 sigma |
+| exact B and Q | exact_counts: 600/600 at B_target 88, 40/40 and 320/320 at B_target 400 (B8); rejection reference: 200/200, 200/200, 60/60 at B_target 100, 200, 400 | exact |
+
+A first run of the small-system comparison with 120000 poisson samples (1768 accepted) gave a smallest multiplicity p of 0.013 (pi0), a high-statistics repeat with 720000 samples (10536 accepted, seed 78) 0.091; the committed test uses 480000 samples (7038 accepted, seed 77).
+The expected accepted numbers also give a new report field: `expected_net_B_accepted` equals the surface baryon integral when no element has negative p.dSigma (checked for a static box to 1e-10).
+
+**R2. Timing, 1e6-element synthetic surface (100 temperature blocks, rho = 0.15 fm^-3, mu_B from the hadron gas), B_target 400, Q_target 158 (B8; the cost per sample includes about 515 accepted particles).**
+Samples per second (accepted samples / wall time of `sample_all`, one run each; every global_B_Q sample has B = 400 and Q = 158: 40/40 and 320/320). The 16-thread runs last 0.05 - 0.5 s and the figures of single runs vary by tens of per cent; the thread counts are those of the `set_threads` request (the Mac has 8 performance cores, the GPU node host 20 cores).
+
+| Machine / build | Mode | 1 thread | 16 threads |
+|---|---|---|---|
+| GPU node host (cuda-turing75 build, host code) | global_B_Q (exact_counts) | 126.19 samples/s (40 in 0.32 s) | 608.20 samples/s (320 in 0.53 s) |
+| GPU node host | poisson | 198.34 samples/s (400 in 2.02 s) | 2106.26 samples/s (3200 in 1.52 s) |
+| Mac (cpu-serial build) | global_B_Q | 556.07 samples/s (40 in 0.07 s) | 6251.11 samples/s (320 in 0.05 s) |
+| Mac | poisson | 969.07 samples/s (400 in 0.41 s) | 13242.81 samples/s (3200 in 0.24 s) |
+
+For comparison the first version (baryon-stage rejection with the pre-existing label rejection replaced by label draws) ran at 7.12 samples/s (1 thread) and 49.05 samples/s (16 threads) on the GPU node host and 33.23 / 277.54 samples/s on the Mac at B = 400 (see B8 above), and the full label rejection of the first version would have added a factor of about 4000 at B = 400.
+Preparation: 0.16 s (GPU node host, 1 thread; 0.04 s on the Mac) for 1e6 elements in blocks of identical state, 43.3 us (GPU node host) and 6.1 us (Mac) per element for distinct states, with the acceptance quadrature included only for space-like elements (the synthetic surface is time-like).
+Production cost per event at B about 400 on the GPU node host: about 8 ms (1 thread) for `global_B_Q` and 5 ms for the unconstrained poisson mode.

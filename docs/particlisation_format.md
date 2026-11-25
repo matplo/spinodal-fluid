@@ -53,7 +53,9 @@ This is the standard method (Huovinen and Petersen; iSS) and gives dN = g f p.dS
 
 **Negative contributions.** For every candidate the weight w = p*.dSigma*/(E* dSigma_max) is in [-1, 1]. The sample records sum w^+ and sum w^- (rejected negative contributions) over the candidates of the accepted trial, as number, lab-energy
 and |baryon number| weighted sums, and reports `negative_fraction` = sum w^- / (sum w^+ + sum w^-) for each (so that a purely space-like element, p.dSigma = p^x A dt, gives 0.5). Particles with p.dSigma < 0 are never produced.
-The fraction is a Monte Carlo estimate over the candidates of one sample, so it fluctuates with the number of candidates.
+The fraction is a Monte Carlo estimate over the candidates of one sample, so it fluctuates with the number of candidates (in `exact_counts` the candidates are drawn until the required number is accepted, a stopping rule that biases the estimate slightly); the exact expectation for the surface is `expected_negative_fraction_number` in the preparation report.
+
+**Closed-form angular average.** With v = k/E and c = cos(theta) between the momentum and dSigma*_vec, w = (d0 - v s c)/dSigma_max with s = |dSigma*_vec|; the average over c of max(w, 0) is max(d0, 0)/dSigma_max for v s <= |d0| and (v s + d0)^2/(4 v s dSigma_max) otherwise, so alpha_e,s = <max(w,0)> over the thermal distribution and the expected accepted number is n dSigma_max alpha (the negative part is alpha - d0/dSigma_max).
 
 ### 2.3 Thermal integrals and momentum sampling (`thermal.hpp`)
 
@@ -64,12 +66,18 @@ panel edges at E = m + T t (t = 0 ... 50) and E = mu + T j (j = -30 ... 45, the 
 ### 2.4 Conservation (`sampler.conservation`)
 
 * `global_B_Q`\* - the sampled event has exactly B_target and Q_target. B_target = round(Int N^mu dSigma_mu over the **sampled** elements) (elements skipped by `spline_policy = skip` or cold are not part of the target), Q_target = round(B_target Z/A) with `sampler.charge_Z/charge_A` = 82/208.
-  *Baryon number*: whole-event rejection of the baryon sector (N and Nbar for `eos_consistent`; all baryons for `hrg`): the sector is drawn again until the net baryon number equals B_target. The sectors are independent, so the accepted sample is exactly
-  the conditional distribution of the Poisson process given its net baryon number, and the pion sector is drawn once afterwards.
-  *Charge, `eos_consistent`*: the EoS is isospin symmetric, so the charge states are labels. Every N / Nbar / pion gets a label drawn uniformly from its members (p, n with probability 1/2; pbar, nbar 1/2; pi+, pi0, pi- 1/3 each); the label vector is
-  redrawn (momenta and positions are kept) until sum Q = Q_target. This is exactly the conditional distribution of independent uniform labels given their charge sum. A target that is not reachable stops after `sampler.max_label_trials` and the sample is reported as failed.
-  *Charge, `hrg`*: the charge is carried by the species; a trial is the baryon sector (checked for B first) followed by the meson sector, and the whole trial is rejected unless Q = Q_target (`sampler.max_trials`). This is exact but its efficiency is low (Section 5).
-  The acceptance efficiency is reported per sample (`efficiency`: `trials_baryon_or_joint`, `trials_charge_labels`; the aggregated efficiency is samples/trials).
+  Two methods (`sampler.global_method`):
+  * `exact_counts`\* (`eos_consistent` only; **no rejection**). The model is a Poisson process, so the accepted numbers of the charge states are independent Poisson variables: p, n with mean Abar_N/2 each, pbar, nbar with Abar_Nbar/2, pi+, pi0, pi- with Abar_pi/3,
+    where Abar_s = Sum_e n_s dSigma_max,e alpha_e,s is the expected number of accepted particles of species s, computed at preparation by quadrature with the closed-form angular average alpha of Section 2.2 (`thermal_density_acceptance`; for every time-like element
+    alpha = max(u.dSigma, 0)/dSigma_max and n dSigma_max alpha = n u.dSigma, no integral). The sampled event is this process conditioned on B = Np + Nn - Npb - Nnb = B_target and Q = Np - Npb + Npi+ - Npi- = Q_target. Because the numbers are Poisson, the conditioning is done on the numbers:
+    (1) the number of antinucleons nNb is drawn from P(nNb) ~ Pois(B_target + nNb; Abar_N) Pois(nNb; Abar_Nbar) G(nNb), G = P(Q | nN, nNb) (table built once per surface; window mean + 14 sigma + 30, probability left outside below 1e-40);
+    (2) a - b = u and s = pi+ - pi-: P(u) ~ pU(u) Skellam(Q - u), a ~ Bin(nN, 1/2) given u, then pi+ given s from Pois x Pois, pi0 ~ Pois(Abar_pi/3) (`draw_charge_counts`);
+    (3) exactly that many accepted particles of each group are drawn (candidates until the required number is accepted; the accepted particles of a Poisson process are iid from its accepted intensity), and the charge labels are assigned by uniform random permutations.
+    The whole procedure is exact (no approximation beyond the truncation windows), costs one pass over about 1.3 candidates per accepted particle, and has acceptance 1. Fixing the numbers first and assigning charges afterwards is **not** exact: the conditioning on Q also changes the distribution of the pion and antinucleon numbers
+    (tested: that variant failed the comparison with the brute-force conditioned Poisson mode, pi+ multiplicity p = 1e-4, pi- 4e-3, see `docs/validation.md`).
+  * `rejection` (reference, `eos_consistent`): whole-event rejection of the baryon sector until the net baryon number is B_target, pions once, then the label vector redrawn until Q = Q_target. Exact but its acceptance falls with B (baryon stage 4.1 % at B = 100, 3.0 % at 200, 2.5 % at 400; label stage 1.6 %, 0.36 %, 0.025 %).
+  * `hrg`: the charge is carried by the species and the species have different masses, so the joint (B, Q) rejection is kept: a trial is the baryon sector (checked for B first) followed by the meson sector, and the whole trial is rejected unless Q = Q_target (`sampler.max_trials`). Exact, low efficiency (Section 5).
+  The per-sample summary reports `trials_baryon_or_joint` and `trials_charge_labels` (1 and 1 for `exact_counts`); the aggregated acceptance is samples/trials. `max_label_trials` applies to `rejection` only.
 * `poisson` - no constraint; N, Nbar, pions fluctuate, labels are uniform.
 
 ### 2.5 Equation-of-state region (`sampler.spline_policy`)
@@ -99,14 +107,14 @@ The mass column carries the mass of the sampler (0.940 / 0.140 GeV for `eos_cons
 whether SMASH's List modus of the version in use accepts a block with several times has to be checked by the afterburner package (not tested here: SMASH is not run by this package).
 Failed samples are omitted from the OSCAR file and flagged in the JSON.
 
-`<out>/<sampler.output_prefix>.json`: `preparation` (element counts, spline/cold elements and their fluxes, B_target, Q_target, expected number of candidates), timings, and `samples`: one summary per sample with
+`<out>/<sampler.output_prefix>.json`: `preparation` (element counts, spline/cold elements and their fluxes, B_target, Q_target, expected number of candidates, `expected_accepted_per_species`, `expected_net_B_accepted`, `expected_negative_fraction_number`: the exact expected accepted numbers and negative fraction), timings, and `samples`: one summary per sample with
 `counts` (per species), `sum` (E, Px, Py, Pz, B, Q), `targets`, `surface_integrals`, `mismatch_sampled_minus_surface`, `negative_fraction`, `skipped`, `spline_region_flagged_elements`, `candidates_in_accepted_trial`, `efficiency`, `seed`, `ok`.
 `<out>/config_used.json`: effective configuration.
 
 ## 4. Configuration keys (block `sampler`, `config/defaults.json`; default marked \* in the decision register, `docs/decisions_spinodal.md` S25 - S29)
 
 `surface` (base path), `output_prefix`, `species`, `quantum_statistics` (true\*; false = Boltzmann), `nucleon_mass_GeV` 0.940, `pion_mass_GeV` 0.140, `mean_field_K_MeV` 300, `hrg_particles_file`, `hrg_max_mass_GeV`,
-`conservation`, `charge_Z`, `charge_A`, `spline_policy`, `spline_tol_rel`, `spline_tol_abs_fm3`, `T_min_GeV`, `position`, `sort_by_time`, `n_samples`, `seed`, `quad_nodes`, `max_trials`, `max_label_trials`, `threads`.
+`conservation`, `global_method`, `charge_Z`, `charge_A`, `spline_policy`, `spline_tol_rel`, `spline_tol_abs_fm3`, `T_min_GeV`, `position`, `sort_by_time`, `n_samples`, `seed`, `quad_nodes`, `max_trials`, `max_label_trials`, `threads`.
 
     spf_sample --surface <base> --out <dir> [--config file] [--override file] [sampler.key=value ...]
 
