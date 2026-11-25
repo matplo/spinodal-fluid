@@ -15,7 +15,7 @@
     "max_outside_fraction": 1e-05
   },
   "run": {
-    "t_max_after_init_fm": 6.0,
+    "t_max_after_init_fm": 30.0,
     "max_recovery_failures": 0,
     "stop_at_fluid_end": true
   },
@@ -39,5 +39,8 @@
   },
   "shasta": {
     "e_vac_GeV_fm3": 1e-08
+  },
+  "particlisation": {
+    "enabled": true
   }
 }

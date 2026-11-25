@@ -12,6 +12,7 @@
 #include "spf/hydro3d.hpp"
 #include "spf/initial_state.hpp"
 #include "spf/observables.hpp"
+#include "spf/surface.hpp"
 
 #include <sys/resource.h>
 
@@ -21,6 +22,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -70,6 +72,16 @@ nlohmann::json marginals(const std::vector<double>& R, int nx, int ny, int nz, d
   return {{"x", mx}, {"y", my}, {"z", mz}};
 }
 
+// sha256 recorded in the header of the EoS table in use (empty for the analytic and cold-thermal models)
+std::string eos_table_sha256(const spf::Config& cfg) {
+  if (!spf::eos_model_uses_table(spf::eos_model_from_config(cfg))) return "";
+  std::string p = cfg.get<std::string>("eos.table_path");
+  if (p.size() > 5 && p.compare(p.size() - 5, 5, ".json") == 0) p.resize(p.size() - 5);
+  std::ifstream in(p + ".json");
+  const nlohmann::json h = nlohmann::json::parse(in, nullptr, false);
+  return (!h.is_discarded() && h.contains("sha256")) ? h["sha256"].get<std::string>() : "";
+}
+
 bool status_is_ok(const std::string& s) { return s == "fluid_end" || s == "t_max"; }
 
 template <class EoS>
@@ -113,6 +125,27 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
     J["recovery_failures_initial_state"] = fail_init;
     const bool cell_diag = cfg.get<bool>("run.cell_diagnostics");
     h.track_vacuum = cell_diag;
+    // ------------------------------------------------------------ particlisation surface (WP10a): initial slice before the first record
+    const spf::ParticlisationParams pp = spf::ParticlisationParams::from_config(cfg);
+    std::unique_ptr<spf::SurfaceFinder<EoS>> sf;
+    auto tot_ref = tot0;  // reference of the leaving fractions: the state that is evolved
+    if (pp.enabled) {
+      const auto t_sf = Clock::now();
+      typename spf::SurfaceFinder<EoS>::Meta meta;
+      meta.t_init = st.t_init_fm;
+      meta.origin = spf::centred_origin(grid);
+      meta.json = {{"event_id", id}, {"E_lab_GeV", cfg.get<double>("ic.e_lab_gev")}, {"eos_model", cfg.get<std::string>("eos.model")},
+                   {"eos_table_sha256", eos_table_sha256(cfg)}, {"eos_table_interpolation", cfg.get<std::string>("eos.table_interpolation")},
+                   {"eos_scale_b", cfg.get<double>("eos.scale_b")}, {"eos_scale_c", cfg.get<double>("eos.scale_c")},
+                   {"gradient_form", cfg.get<std::string>("gradient.form")}, {"generator", st.generator},
+                   {"oscar_path", cfg.get<std::string>("ic.oscar_path")}, {"oscar_time_fm", st.oscar_time_fm}};
+      std::string odir = pp.output_dir.empty() ? edir : pp.output_dir;
+      sf = std::make_unique<spf::SurfaceFinder<EoS>>(eos, pp, grid, odir + "/" + event_dir_name(id), meta);
+      sf->begin(h);
+      tot_ref = h.totals();
+      Kokkos::fence();
+      J["wall_surface_begin_s"] = seconds_since(t_sf);
+    }
     const bool want_marg = cfg.get<bool>("run.marginals");
     nlohmann::json marg;
     if (want_marg) marg["start"] = marginals(h.interior_copy(h.U[0]), gc.n[0], gc.n[1], gc.n[2], gc.dx);
@@ -179,6 +212,11 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
         if (h.n_recover_fail_total - n0 > max_fail) { status = "recovery_failure"; ++s; break; }
         diagnose();
         observe();
+        if (sf) {
+          // with particlisation the event runs until the surface is complete (no cell at or above eps_sw), capped by t_max
+          if (sf->after_step(h)) { status = "fluid_end"; ++s; break; }
+          continue;
+        }
         if (stop_fe && !std::isnan(fluid_end_time)) { status = "fluid_end"; ++s; break; }
       }
     }
@@ -203,8 +241,8 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
     J["limiter_cells_run"] = h.n_clamped_total;
     J["baryon_on_grid_final"] = tot1.R * v3;
     J["energy_on_grid_final_GeV"] = tot1.E * v3;
-    J["baryon_leaving_fraction"] = tot0.R != 0.0 ? 1.0 - tot1.R / tot0.R : 0.0;
-    J["energy_leaving_fraction"] = tot0.E != 0.0 ? 1.0 - tot1.E / tot0.E : 0.0;
+    J["baryon_leaving_fraction"] = tot_ref.R != 0.0 ? 1.0 - tot1.R / tot_ref.R : 0.0;
+    J["energy_leaving_fraction"] = tot_ref.E != 0.0 ? 1.0 - tot1.E / tot_ref.E : 0.0;
     J["momentum_z_final_GeV"] = tot1.Mz * v3;
     {
       const auto& H = rec.history();
@@ -238,6 +276,21 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
                                {"vacuum_cut_removed_cells_total", h.vac_removed_cells},
                                {"vacuum_cut_removed_E_fraction_of_initial", h.vac_removed_E / E0},
                                {"vacuum_cut_removed_R_fraction_of_initial", h.vac_removed_R / R0}};
+    }
+    if (sf) {
+      nlohmann::json extra = {{"status", status}, {"steps", h.steps}, {"time_after_init_fm", h.time},
+                              {"t_max_after_init_fm", t_max}, {"hit_t_max", !sf->closed()}};
+      sf->finish(h, extra);
+      const auto& S = sf->summary(0);
+      J["particlisation"] = {{"eps_sw_eps_s", pp.eps_sw_eps_s}, {"method", S["method"]}, {"closed", sf->closed()}, {"hit_t_max", !sf->closed()},
+                             {"surface_file", sf->output_base(0) + ".surface.bin"}, {"n_outputs", sf->n_outputs()},
+                             {"n_elements", S["n_elements"]}, {"n_elements_initial_slice", S["n_elements_initial_slice"]},
+                             {"n_elements_surface", S["n_elements_surface"]}, {"closure", S["closure"]},
+                             {"end_time_after_init_fm", h.time}, {"wall_surface_s", sf->wall_s()},
+                             {"diagnostics", S["diagnostics"]},
+                             {"leaving_fractions_relative_to", "state after the initial slice was removed"},
+                             {"energy_on_grid_after_initial_slice_GeV", tot_ref.E * v3}, {"baryon_on_grid_after_initial_slice", tot_ref.R * v3}};
+      if (!sf->closed()) std::printf("event %03d: surface not closed at t_max = %.2f fm/c (cells at or above eps_sw remain)\n", id, t_max);
     }
     J["wall_evolve_s"] = wall_evolve;
     J["wall_observe_s"] = wall_obs;
