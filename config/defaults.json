@@ -135,11 +135,13 @@
   "particlisation": {
     "enabled": false,
     "eps_sw_eps_s": 4.0,
+    "initial_slice": "remove",
     "surface": {
       "method": "isoenergy",
       "isochronous_times_fm": [],
       "isochronous_cells": "all",
       "first_level": "before_removal",
+      "interpolation": "conserved",
       "output_dir": ""
     }
   }

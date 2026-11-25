@@ -34,6 +34,8 @@ inline constexpr int kSurfRecord = 16;  // values per element in the .bin file
 enum class SurfaceMethod { Isoenergy, Isochronous };
 enum class IsochronousCells { All, AboveEpsSw };
 enum class FirstLevel { BeforeRemoval, AfterRemoval };
+enum class SurfInterp { Conserved, Primitive };
+enum class InitialSlice { Remove, Keep };
 
 struct ParticlisationParams {
   bool enabled = false;
@@ -42,6 +44,8 @@ struct ParticlisationParams {
   std::vector<Real> isochronous_times_fm;
   IsochronousCells iso_cells = IsochronousCells::All;
   FirstLevel first_level = FirstLevel::BeforeRemoval;
+  SurfInterp interp = SurfInterp::Conserved;
+  InitialSlice initial_slice = InitialSlice::Remove;
   std::string output_dir;
   Real eps_s = 0.94 * 0.153;  // m_N rho_s from constants.*
 
@@ -65,6 +69,14 @@ struct ParticlisationParams {
     if (fl == "before_removal") p.first_level = FirstLevel::BeforeRemoval;
     else if (fl == "after_removal") p.first_level = FirstLevel::AfterRemoval;
     else throw ConfigError("particlisation.surface.first_level must be 'before_removal' or 'after_removal', got '" + fl + "'");
+    const std::string ip = cfg.get<std::string>("particlisation.surface.interpolation");
+    if (ip == "conserved") p.interp = SurfInterp::Conserved;
+    else if (ip == "primitive") p.interp = SurfInterp::Primitive;
+    else throw ConfigError("particlisation.surface.interpolation must be 'conserved' or 'primitive', got '" + ip + "'");
+    const std::string is = cfg.get<std::string>("particlisation.initial_slice");
+    if (is == "remove") p.initial_slice = InitialSlice::Remove;
+    else if (is == "keep") p.initial_slice = InitialSlice::Keep;
+    else throw ConfigError("particlisation.initial_slice must be 'remove' or 'keep', got '" + is + "'");
     p.output_dir = cfg.get<std::string>("particlisation.surface.output_dir");
     if (!(p.eps_sw_eps_s > 0.0)) throw ConfigError("particlisation.eps_sw_eps_s must be positive");
     if (p.method == SurfaceMethod::Isochronous && p.isochronous_times_fm.empty())
@@ -150,21 +162,98 @@ constexpr bool eos_has_T_mu() {
   };
 }
 
-// One time level of the surface finder: eps, rho and the spatial components u^i = gamma v^i of the last update_primitives().
+// One time level of the surface finder.  Field 0 is always eps (the iso criterion).  Primitive interpolation: 1..4 = rho, u^x, u^y, u^z
+// (u^i = gamma v^i of the last update_primitives()); conserved interpolation: 1..5 = R, M_x, M_y, M_z, E (the cell values of the solver).
 struct StoreLevelK {
   Field3 eps, rho, vx, vy, vz;
-  Field3 le, lr, lx, ly, lz;
+  Field3 R, Mx, My, Mz, E;
+  int conserved;
+  Field3 l0, l1, l2, l3, l4, l5;
   KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
+    l0(i, j, k) = eps(i, j, k);
+    if (conserved) {
+      l1(i, j, k) = R(i, j, k); l2(i, j, k) = Mx(i, j, k); l3(i, j, k) = My(i, j, k); l4(i, j, k) = Mz(i, j, k); l5(i, j, k) = E(i, j, k);
+      return;
+    }
     const Real a = vx(i, j, k), b = vy(i, j, k), c = vz(i, j, k);
     const Real v2 = a * a + b * b + c * c;
     const Real g = v2 < 1.0 ? 1.0 / Kokkos::sqrt(1.0 - v2) : 0.0;
-    le(i, j, k) = eps(i, j, k);
-    lr(i, j, k) = rho(i, j, k);
-    lx(i, j, k) = g * a;
-    ly(i, j, k) = g * b;
-    lz(i, j, k) = g * c;
+    l1(i, j, k) = rho(i, j, k);
+    l2(i, j, k) = g * a;
+    l3(i, j, k) = g * b;
+    l4(i, j, k) = g * c;
+    l5(i, j, k) = 0.0;
   }
 };
+
+// Rest-frame state (eps, rho, u^i) of conserved values (R, M, E) with the pressure p0 alone, in a form that stays accurate when |M| -> E
+// (dilute matter moving at nearly the speed of light): the primitive recovery of the solver (recover_core) gives the pressure, then
+//   eps = ((E - |M|)(E + |M|) + E p) / (E + p),  gamma^2 = (E + p) / (eps + p),  u^i = M^i / sqrt((E + p)(eps + p)),  rho = R / gamma,
+// iterated with p = p0(eps, rho) to a fixed point.  With these values T^{00} = (eps + p) u0^2 - p = E and T^{0i} = M^i to rounding (the velocity
+// of the recovery alone loses all digits of 1 - v there).  Light-like cells (gamma above kSurfGammaCap, in particular |M| = E exactly, which the
+// E >= |M| limiter of the solver produces at vacuum fronts) cannot be represented by a finite four-velocity; they get gamma = kSurfGammaCap
+// along M and eps = (E + p) / gamma^2 - p, so that T^{00} = E still holds and |T^{0i}| = (E + p) v differs from |M| by O(E / gamma^2).
+// Returns the failure flag of the recovery, plus 4 if the light-like branch was used.
+inline constexpr Real kSurfGammaCap = 1.0e4;
+
+template <class EoS>
+KOKKOS_INLINE_FUNCTION int state_from_conserved(const EoS& eos, Real R, Real Mx, Real My, Real Mz, Real E, Real& e, Real& rho, Real u[3]) {
+  u[0] = u[1] = u[2] = 0.0;
+  e = 0.0;
+  rho = 0.0;
+  if (!(E > 0.0)) return 0;
+  const Real Ma = Kokkos::sqrt(Mx * Mx + My * My + Mz * Mz);
+  Real c, p;
+  const int fl = recover_core(eos, R, Ma, E, 0.0, 0.0, e, rho, c, p, -1.0);
+  const Real Rp = R > 0.0 ? R : 0.0;
+  if (!(E + p > 0.0)) {  // pressure of the table not above -E: matter at rest
+    e = E;
+    rho = Rp;
+    return fl;
+  }
+  const Real dm = E - Ma > 0.0 ? E - Ma : 0.0;
+  const Real g2cap = kSurfGammaCap * kSurfGammaCap;
+  bool light = false;
+  for (int it = 0; it < 60; ++it) {
+    const Real Ep = E + p;
+    e = (dm * (E + Ma) + E * p) / Ep;
+    const Real ep = e + p;
+    if (!(ep > 0.0) || Ep > g2cap * ep) { light = true; break; }
+    rho = Rp * Kokkos::sqrt(ep / Ep);
+    const Real pn = eos.p0(e, rho);
+    const Real d = Kokkos::fabs(pn - p);
+    p = pn;
+    if (d <= 1e-16 * Ep) break;
+  }
+  if (!light) {
+    const Real Ep = E + p;
+    e = (dm * (E + Ma) + E * p) / Ep;
+    const Real ep = e + p;
+    if (ep > 0.0 && Ep <= g2cap * ep) {
+      const Real s = 1.0 / Kokkos::sqrt(Ep * ep);
+      rho = Rp * Kokkos::sqrt(ep / Ep);
+      u[0] = Mx * s; u[1] = My * s; u[2] = Mz * s;
+      return fl;
+    }
+  }
+  // light-like branch: gamma = kSurfGammaCap
+  rho = Rp / kSurfGammaCap;
+  p = eos.p0(0.0, rho);
+  for (int it = 0; it < 60; ++it) {
+    e = (E + p) / g2cap - p;
+    if (e < 0.0) e = 0.0;
+    const Real pn = eos.p0(e, rho);
+    const Real d = Kokkos::fabs(pn - p);
+    p = pn;
+    if (d <= 1e-16 * (E + p)) break;
+  }
+  e = (E + p) / g2cap - p;
+  if (e < 0.0) e = 0.0;
+  const Real ug = Kokkos::sqrt(g2cap - 1.0);  // |u| = gamma v
+  const Real s = Ma > 0.0 ? ug / Ma : 0.0;
+  u[0] = Mx * s; u[1] = My * s; u[2] = Mz * s;
+  return fl | 4;
+}
 
 // Common record writer: 16 values at row r of the buffer.
 template <class EoS>
@@ -179,25 +268,35 @@ KOKKOS_INLINE_FUNCTION void write_record(const EoS& eos, const SurfBuffer& buf, 
 
 // Isoenergy surface between two levels.  Iterates over the hypercubes whose lower spatial corner is interior cell (i, j, k) with
 // i < g + n - 1 (cubes between interior cell centres).  errs(0): hypercubes with inconsistent topology, errs(1): pieces dropped
-// (more than kMaxPieces), errs(2): records beyond the buffer capacity (the caller enlarges the buffer and repeats the step).
+// (more than kMaxPieces), errs(2): records beyond the buffer capacity (the caller enlarges the buffer and repeats the step), errs(3): elements
+// whose primitive recovery from the interpolated conserved fields failed.
+// Values at the centroid (particlisation.surface.interpolation): conserved (default) - R, M, E interpolated multilinearly, then (eps, rho, v)
+// by the primitive recovery of the solver with p0 (recover_core, p_extra = 0), u = gamma v; primitive - eps, rho, u^i interpolated, u^0 from
+// the normalisation.  eps of the iso criterion is always the interpolated rest-frame energy density.
 template <class EoS>
 struct SurfaceIsoK {
   EoS eos;
-  Field3 e0, r0, x0, y0, z0, e1, r1, x1, y1, z1;
+  Field3 a0, a1, a2, a3, a4, a5, b0, b1, b2, b3, b4, b5;  // levels at t0 and t0 + dt (StoreLevelK)
+  int conserved;
   Real eps_sw, t0, dt, dx;
   Real org[3];  // physical position of interior cell (0, 0, 0)
   int g[3];
   SurfBuffer buf;
   Kokkos::View<long> count;
-  Kokkos::View<long[3]> errs;
+  Kokkos::View<long[4]> errs;
   long cap;
+  KOKKOS_INLINE_FUNCTION void corners(const Field3& A, const Field3& B, int i, int j, int k, Real v[16]) const {
+    for (int c = 0; c < 16; ++c) {
+      const int ii = i + ((c >> 1) & 1), jj = j + ((c >> 2) & 1), kk = k + ((c >> 3) & 1);
+      v[c] = (c & 1) ? B(ii, jj, kk) : A(ii, jj, kk);
+    }
+  }
   KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
     Real f[16];
+    corners(a0, b0, i, j, k, f);
     Real fmin = 1e300, fmax = -1e300;
     for (int c = 0; c < 16; ++c) {
-      const int bt = c & 1, bx = (c >> 1) & 1, by = (c >> 2) & 1, bz = (c >> 3) & 1;
-      const Real e = bt ? e1(i + bx, j + by, k + bz) : e0(i + bx, j + by, k + bz);
-      f[c] = e - eps_sw;
+      f[c] -= eps_sw;
       fmin = f[c] < fmin ? f[c] : fmin;
       fmax = f[c] > fmax ? f[c] : fmax;
     }
@@ -209,22 +308,28 @@ struct SurfaceIsoK {
     if (np == -2) { Kokkos::atomic_add(&errs(1), 1L); np = surf::kMaxPieces; }
     if (np <= 0) return;
     const long base = Kokkos::atomic_fetch_add(&count(), static_cast<long>(np));
-    Real ve[16], vr[16], vx[16], vy[16], vz[16];
-    for (int c = 0; c < 16; ++c) {
-      const int bt = c & 1, ii = i + ((c >> 1) & 1), jj = j + ((c >> 2) & 1), kk = k + ((c >> 3) & 1);
-      ve[c] = bt ? e1(ii, jj, kk) : e0(ii, jj, kk);
-      vr[c] = bt ? r1(ii, jj, kk) : r0(ii, jj, kk);
-      vx[c] = bt ? x1(ii, jj, kk) : x0(ii, jj, kk);
-      vy[c] = bt ? y1(ii, jj, kk) : y0(ii, jj, kk);
-      vz[c] = bt ? z1(ii, jj, kk) : z0(ii, jj, kk);
-    }
+    Real v1[16], v2[16], v3[16], v4[16], v5[16];
+    corners(a1, b1, i, j, k, v1);
+    corners(a2, b2, i, j, k, v2);
+    corners(a3, b3, i, j, k, v3);
+    corners(a4, b4, i, j, k, v4);
+    if (conserved) corners(a5, b5, i, j, k, v5);
     for (int p = 0; p < np; ++p) {
       const long r = base + p;
       if (r >= cap) { Kokkos::atomic_add(&errs(2), 1L); continue; }
       const Real* xc = pc[p].xc;
       const Real X[4] = {t0 + xc[0] * dt, org[0] + (i - g[0] + xc[1]) * dx, org[1] + (j - g[1] + xc[2]) * dx, org[2] + (k - g[2] + xc[3]) * dx};
-      write_record(eos, buf, r, X, pc[p].n, surf::interp16(vx, xc), surf::interp16(vy, xc), surf::interp16(vz, xc), surf::interp16(ve, xc),
-                   surf::interp16(vr, xc));
+      if (conserved) {
+        const Real R = surf::interp16(v1, xc), Mx = surf::interp16(v2, xc), My = surf::interp16(v3, xc), Mz = surf::interp16(v4, xc);
+        const Real E = surf::interp16(v5, xc);
+        Real e, rh, u[3];
+        const int fl = state_from_conserved(eos, R, Mx, My, Mz, E, e, rh, u);
+        if (fl & 1) Kokkos::atomic_add(&errs(3), 1L);
+        write_record(eos, buf, r, X, pc[p].n, u[0], u[1], u[2], e, rh);
+      } else {
+        write_record(eos, buf, r, X, pc[p].n, surf::interp16(v2, xc), surf::interp16(v3, xc), surf::interp16(v4, xc), surf::interp16(f, xc) + eps_sw,
+                     surf::interp16(v1, xc));
+      }
     }
   }
 };
@@ -234,7 +339,7 @@ struct SurfaceIsoK {
 template <class EoS>
 struct CellElementsK {
   EoS eos;
-  Field3 eps, rho, vx, vy, vz;
+  Field3 eps, R, Mx, My, Mz, E;  // eps of the last update_primitives() selects; the record is made from the conserved values of the cell
   Real lo, hi;  // select lo < eps < hi
   int hi_inclusive_above;  // 1: select eps >= lo instead (isochronous above_eps_sw)
   Real t, dx;
@@ -242,23 +347,23 @@ struct CellElementsK {
   int g[3];
   SurfBuffer buf;
   Kokkos::View<long> count;
-  Kokkos::View<long[3]> errs;
+  Kokkos::View<long[4]> errs;
   long cap;
   Kokkos::View<int***> flag;  // set to 1 for selected cells if flag_cells
   int flag_cells;
   KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
-    const Real e = eps(i, j, k);
-    const bool sel = hi_inclusive_above ? (e >= lo) : (e > lo && e < hi);
+    const Real ec = eps(i, j, k);
+    const bool sel = hi_inclusive_above ? (ec >= lo) : (ec > lo && ec < hi);
     if (!sel) return;
     if (flag_cells) flag(i, j, k) = 1;
     const long r = Kokkos::atomic_fetch_add(&count(), 1L);
     if (r >= cap) { Kokkos::atomic_add(&errs(2), 1L); return; }
-    const Real a = vx(i, j, k), b = vy(i, j, k), c = vz(i, j, k);
-    const Real v2 = a * a + b * b + c * c;
-    const Real gm = 1.0 / Kokkos::sqrt(1.0 - v2);
+    Real e, rh, u[3];
+    const int fl = state_from_conserved(eos, R(i, j, k), Mx(i, j, k), My(i, j, k), Mz(i, j, k), E(i, j, k), e, rh, u);
+    if (fl & 1) Kokkos::atomic_add(&errs(3), 1L);
     const Real X[4] = {t, org[0] + (i - g[0]) * dx, org[1] + (j - g[1]) * dx, org[2] + (k - g[2]) * dx};
     const Real n[4] = {dx * dx * dx, 0.0, 0.0, 0.0};
-    write_record(eos, buf, r, X, n, gm * a, gm * b, gm * c, e, rho(i, j, k));
+    write_record(eos, buf, r, X, n, u[0], u[1], u[2], e, rh);
   }
 };
 
@@ -338,9 +443,9 @@ class SurfaceFinder {
   SurfaceFinder(const EoS& eos, const ParticlisationParams& prm, const Grid& grid, const std::string& base, const Meta& meta)
       : eos_(eos), prm_(prm), grid_(grid), base_(base), meta_(meta) {
     for (int l = 0; l < 2; ++l)
-      for (int c = 0; c < 5; ++c) lev_[l][c] = grid.make_field("surf_level");
+      for (int c = 0; c < 6; ++c) lev_[l][c] = grid.make_field("surf_level");
     count_ = Kokkos::View<long>("surf_count");
-    errs_ = Kokkos::View<long[3]>("surf_errs");
+    errs_ = Kokkos::View<long[4]>("surf_errs");
     cap_ = 1 << 16;
     buf_ = SurfBuffer("surf_buf", cap_);
     if (prm_.method == SurfaceMethod::Isochronous) {
@@ -371,6 +476,10 @@ class SurfaceFinder {
   long n_pieces_dropped() const { return err_total_[1]; }
   long n_edge_cells_max() const { return n_edge_max_; }
   SurfStatus last_status() const { return status_; }
+  // Running totals of output q: initial slice and surface elements so far; initial totals on the grid.
+  SurfFlux flux_initial(size_t q = 0) const { return outs_.at(q).flux_initial; }
+  SurfFlux flux_surface(size_t q = 0) const { return outs_.at(q).flux_surface; }
+  SurfFlux totals_initial() const { return init_; }
 
   void begin(Hydro3D<EoS>& h) {
     const auto t0 = clock_();
@@ -386,7 +495,7 @@ class SurfaceFinder {
     // initial slice
     Kokkos::View<int***> flag("surf_flag", grid_.size(0), grid_.size(1), grid_.size(2));
     auto launch = [&]() {
-      detail::CellElementsK<EoS> k{eos_, h.eps, h.rho, h.vx, h.vy, h.vz, 0.0, prm_.eps_sw(), 0, meta_.t_init, grid_.dx,
+      detail::CellElementsK<EoS> k{eos_, h.eps, h.U[0], h.U[1], h.U[2], h.U[3], h.U[4], 0.0, prm_.eps_sw(), 0, meta_.t_init, grid_.dx,
                                    {meta_.origin[0], meta_.origin[1], meta_.origin[2]}, {grid_.g[0], grid_.g[1], grid_.g[2]},
                                    buf_, count_, errs_, cap_, flag, 1};
       Kokkos::parallel_for("surf_initial_slice", interior_policy(grid_), k);
@@ -399,7 +508,8 @@ class SurfaceFinder {
       o.n_initial = n0;
       o.flux_initial = fl;
     }
-    Kokkos::parallel_for("surf_remove", interior_policy(grid_), detail::RemoveFlaggedK{flag, h.U[0], h.U[1], h.U[2], h.U[3], h.U[4]});
+    if (prm_.initial_slice == InitialSlice::Remove)
+      Kokkos::parallel_for("surf_remove", interior_policy(grid_), detail::RemoveFlaggedK{flag, h.U[0], h.U[1], h.U[2], h.U[3], h.U[4]});
     Kokkos::fence();
     recover(h);
     if (prm_.first_level == FirstLevel::AfterRemoval) store_level(h, 0);
@@ -433,7 +543,7 @@ class SurfaceFinder {
         if (h.time + 1e-9 < prm_.isochronous_times_fm[q]) continue;
         auto launch = [&]() {
           const bool above = prm_.iso_cells == IsochronousCells::AboveEpsSw;
-          detail::CellElementsK<EoS> k{eos_, h.eps, h.rho, h.vx, h.vy, h.vz, above ? prm_.eps_sw() : 0.0, 1e300, above ? 1 : 0, t_now,
+          detail::CellElementsK<EoS> k{eos_, h.eps, h.U[0], h.U[1], h.U[2], h.U[3], h.U[4], above ? prm_.eps_sw() : 0.0, 1e300, above ? 1 : 0, t_now,
                                        grid_.dx, {meta_.origin[0], meta_.origin[1], meta_.origin[2]}, {grid_.g[0], grid_.g[1], grid_.g[2]},
                                        buf_, count_, errs_, cap_, Kokkos::View<int***>(), 0};
           Kokkos::parallel_for("surf_isochronous", interior_policy(grid_), k);
@@ -467,9 +577,9 @@ class SurfaceFinder {
     return closed_;
   }
 
-  // Isoenergy elements between two prescribed levels (eps, rho, u^x, u^y, u^z on this grid, ghost layers included in the extents; level a at
-  // absolute time t0, level b at t0 + dt), sorted; nothing is written to a file.  Used by the tests.
-  std::vector<Real> elements_between(const Field3 a[5], const Field3 b[5], Real t0, Real dt, SurfFlux* fl = nullptr) {
+  // Isoenergy elements between two prescribed levels (fields as in detail::StoreLevelK for the interpolation mode of the parameters; ghost
+  // layers included in the extents; level a at absolute time t0, level b at t0 + dt), sorted; nothing is written to a file.  Used by the tests.
+  std::vector<Real> elements_between(const Field3 a[6], const Field3 b[6], Real t0, Real dt, SurfFlux* fl = nullptr) {
     const long n = iso_run(a, b, t0, dt);
     if (fl) *fl = flux(n);
     return copy_sorted(n);
@@ -505,6 +615,8 @@ class SurfaceFinder {
         J["isochronous_time_fm"] = o.t_iso;
         J["isochronous_cells"] = prm_.iso_cells == IsochronousCells::All ? "all" : "above_eps_sw";
       }
+      J["initial_slice"] = prm_.initial_slice == InitialSlice::Remove ? "remove" : "keep";
+      J["interpolation"] = prm_.interp == SurfInterp::Conserved ? "conserved" : "primitive";
       J["first_level"] = prm_.first_level == FirstLevel::BeforeRemoval ? "before_removal" : "after_removal";
       J["dx_fm"] = grid_.dx;
       J["dt_fm"] = h.dt();
@@ -531,6 +643,7 @@ class SurfaceFinder {
                       {"Pz", init_.E != 0.0 ? (out_plus_in.Pz - init_.Pz) / init_.E : 0.0}};
       J["closed"] = closed_;
       J["diagnostics"] = {{"hypercubes_with_inconsistent_topology", err_total_[0]}, {"pieces_dropped", err_total_[1]},
+                          {"element_recovery_failures", err_total_[2]},
                           {"max_cells_above_eps_sw_on_box_edge", n_edge_max_}, {"buffer_capacity_final", cap_},
                           {"wall_surface_s", wall_}};
       for (auto it = extra.begin(); it != extra.end(); ++it) J[it.key()] = it.value();
@@ -559,10 +672,10 @@ class SurfaceFinder {
   Grid grid_;
   std::string base_;
   Meta meta_;
-  Field3 lev_[2][5];
+  Field3 lev_[2][6];
   SurfBuffer buf_;
   Kokkos::View<long> count_;
-  Kokkos::View<long[3]> errs_;
+  Kokkos::View<long[4]> errs_;
   long cap_;
   std::vector<Out> outs_;
   std::vector<bool> iso_done_;
@@ -570,7 +683,7 @@ class SurfaceFinder {
   SurfStatus status_;
   Real t_prev_ = 0.0;
   bool started_ = false, closed_ = false;
-  long err_total_[2] = {0, 0};
+  long err_total_[3] = {0, 0, 0};
   long n_edge_max_ = 0;
   double wall_ = 0.0;
 
@@ -595,7 +708,9 @@ class SurfaceFinder {
 
   void store_level(Hydro3D<EoS>& h, int l) {
     Kokkos::parallel_for("surf_store_level", interior_policy(grid_),
-                         detail::StoreLevelK{h.eps, h.rho, h.vx, h.vy, h.vz, lev_[l][0], lev_[l][1], lev_[l][2], lev_[l][3], lev_[l][4]});
+                         detail::StoreLevelK{h.eps, h.rho, h.vx, h.vy, h.vz, h.U[0], h.U[1], h.U[2], h.U[3], h.U[4],
+                                             prm_.interp == SurfInterp::Conserved ? 1 : 0, lev_[l][0], lev_[l][1], lev_[l][2], lev_[l][3],
+                                             lev_[l][4], lev_[l][5]});
   }
 
   // Run a kernel that appends to the buffer; enlarge the buffer and repeat if it overflowed.  Returns the number of records.
@@ -613,6 +728,7 @@ class SurfaceFinder {
       if (n <= cap_) {
         err_total_[0] += he(0);
         err_total_[1] += he(1);
+        err_total_[2] += he(3);
         return n;
       }
       cap_ = static_cast<long>(1.25 * n) + 1024;
@@ -621,9 +737,10 @@ class SurfaceFinder {
     throw std::runtime_error("SurfaceFinder: buffer capacity not reached after enlarging");
   }
 
-  long iso_run(const Field3 a[5], const Field3 b[5], Real t0, Real dt) {
+  long iso_run(const Field3 a[6], const Field3 b[6], Real t0, Real dt) {
     auto launch = [&]() {
-      detail::SurfaceIsoK<EoS> k{eos_, a[0], a[1], a[2], a[3], a[4], b[0], b[1], b[2], b[3], b[4], prm_.eps_sw(), t0, dt, grid_.dx,
+      detail::SurfaceIsoK<EoS> k{eos_, a[0], a[1], a[2], a[3], a[4], a[5], b[0], b[1], b[2], b[3], b[4], b[5],
+                                 prm_.interp == SurfInterp::Conserved ? 1 : 0, prm_.eps_sw(), t0, dt, grid_.dx,
                                  {meta_.origin[0], meta_.origin[1], meta_.origin[2]}, {grid_.g[0], grid_.g[1], grid_.g[2]},
                                  buf_, count_, errs_, cap_};
       const int lo[3] = {grid_.g[0], grid_.g[1], grid_.g[2]};
