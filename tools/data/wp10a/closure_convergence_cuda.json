@@ -1,0 +1,149 @@
+{
+ "box_fm": 24.0,
+ "rows": [
+  {
+   "variant": "remove",
+   "dx_fm": 0.4,
+   "rc": 0,
+   "status": "fluid_end",
+   "closed": true,
+   "end_time_after_init_fm": 6.720000000000005,
+   "n_elements": 128450,
+   "n_initial_slice": 67942,
+   "closure": {
+    "B": -0.03381003554101924,
+    "E": -0.033983362077042154,
+    "Px": 6.188471192002508e-07,
+    "Py": -0.00014021564745424233,
+    "Pz": 5.046766148796022e-05,
+    "definition": "(elements + inside at end - initial on grid) / initial on grid; momenta relative to the initial energy"
+   },
+   "inflow_E_fraction": -0.030729085553477253,
+   "file_MB": 16.4416,
+   "wall_evolve_s": 0.771150072,
+   "wall_surface_s": 0.241880533,
+   "backend": "Cuda",
+   "edge_cells": 0
+  },
+  {
+   "variant": "remove",
+   "dx_fm": 0.2,
+   "rc": 0,
+   "status": "fluid_end",
+   "closed": true,
+   "end_time_after_init_fm": 6.720000000000005,
+   "n_elements": 1083141,
+   "n_initial_slice": 536911,
+   "closure": {
+    "B": -0.01286990039607692,
+    "E": -0.01344880098184916,
+    "Px": 6.218812735730597e-05,
+    "Py": -6.025885230762082e-05,
+    "Pz": 3.82628152740668e-05,
+    "definition": "(elements + inside at end - initial on grid) / initial on grid; momenta relative to the initial energy"
+   },
+   "inflow_E_fraction": -0.052735511138155826,
+   "file_MB": 138.642048,
+   "wall_evolve_s": 6.412610390999998,
+   "wall_surface_s": 1.6257677090000002,
+   "backend": "Cuda",
+   "edge_cells": 0
+  },
+  {
+   "variant": "remove",
+   "dx_fm": 0.1,
+   "rc": 0,
+   "status": "fluid_end",
+   "closed": true,
+   "end_time_after_init_fm": 6.800000000000005,
+   "n_elements": 9123629,
+   "n_initial_slice": 4293353,
+   "closure": {
+    "B": -0.004372783101493137,
+    "E": -0.004852409601566374,
+    "Px": 0.00020449777254020462,
+    "Py": 0.00014685049878143406,
+    "Pz": -0.0005917126352198452,
+    "definition": "(elements + inside at end - initial on grid) / initial on grid; momenta relative to the initial energy"
+   },
+   "inflow_E_fraction": -0.07010682264291646,
+   "file_MB": 1167.824512,
+   "wall_evolve_s": 80.61876121599997,
+   "wall_surface_s": 19.58620304599999,
+   "backend": "Cuda",
+   "edge_cells": 0
+  },
+  {
+   "variant": "keep",
+   "dx_fm": 0.4,
+   "rc": 0,
+   "status": "fluid_end",
+   "closed": true,
+   "end_time_after_init_fm": 7.360000000000006,
+   "n_elements": 171409,
+   "n_initial_slice": 67942,
+   "closure": {
+    "B": -0.011176583070819014,
+    "E": -0.012866601201216054,
+    "Px": -1.0399456386829487e-05,
+    "Py": 0.0001567094714799948,
+    "Pz": 0.00010518082167116956,
+    "definition": "(elements + inside at end - initial on grid) / initial on grid; momenta relative to the initial energy"
+   },
+   "inflow_E_fraction": -0.11004080105918257,
+   "file_MB": 21.940352,
+   "wall_evolve_s": 1.2377271890000003,
+   "wall_surface_s": 0.3440444279999999,
+   "backend": "Cuda",
+   "edge_cells": 0
+  },
+  {
+   "variant": "keep",
+   "dx_fm": 0.2,
+   "rc": 0,
+   "status": "fluid_end",
+   "closed": true,
+   "end_time_after_init_fm": 7.920000000000006,
+   "n_elements": 1461357,
+   "n_initial_slice": 536911,
+   "closure": {
+    "B": -0.001481577123204405,
+    "E": -0.0023781468542149234,
+    "Px": 3.059581730268517e-05,
+    "Py": 3.350362906948462e-05,
+    "Pz": 0.0002288174235429634,
+    "definition": "(elements + inside at end - initial on grid) / initial on grid; momenta relative to the initial energy"
+   },
+   "inflow_E_fraction": -0.15054138258362015,
+   "file_MB": 187.053696,
+   "wall_evolve_s": 12.583971227000001,
+   "wall_surface_s": 2.860133259,
+   "backend": "Cuda",
+   "edge_cells": 0
+  },
+  {
+   "variant": "keep",
+   "dx_fm": 0.1,
+   "rc": 0,
+   "status": "fluid_end",
+   "closed": true,
+   "end_time_after_init_fm": 8.040000000000004,
+   "n_elements": 12044205,
+   "n_initial_slice": 4293353,
+   "closure": {
+    "B": 0.0004084016321219568,
+    "E": 8.776148528290836e-05,
+    "Px": 5.674681954065727e-05,
+    "Py": -2.955242342617767e-05,
+    "Pz": 1.9094572723460834e-05,
+    "definition": "(elements + inside at end - initial on grid) / initial on grid; momenta relative to the initial energy"
+   },
+   "inflow_E_fraction": -0.17249317917037613,
+   "file_MB": 1541.65824,
+   "wall_evolve_s": 164.36501708500006,
+   "wall_surface_s": 49.747186699000004,
+   "backend": "Cuda",
+   "edge_cells": 0
+  }
+ ]
+}
