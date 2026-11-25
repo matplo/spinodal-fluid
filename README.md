@@ -63,6 +63,7 @@ tests              doctest unit and regression tests
 tools/digitise_1007_1448.py, tools/data   digitiser for the figures of arXiv:1007.1448 (vector paths of the PDF) and its CSV output
 tools/eos          Python reference for the two-phase equation of state, its reference numbers, and the EoS table writer
 config             default configuration; config/collisions: collision-run configurations (box in fm per energy)
+tools/sampler      high-precision reference values for the sampler tests (mpmath)
 tools/collisions   event generation, batch runs, aggregation, plots; tools/digitise_wp7.py: digitised Figs. of arXiv:1209.2462 and 1302.2956
 docs               plan, decisions, validation log
 ```

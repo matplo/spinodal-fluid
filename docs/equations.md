@@ -362,3 +362,8 @@ for `gamma_k >= 0` the paper only says that the coupling "continually produces a
 ### Fig. 2 numbers
 Ideal case (`nu = q = 0`, `vT2 = vs2 < 0`): `gamma^2 = |vs2| k^2 - B k^4` is maximal at `k0^2 = |vs2|/(2B)` with `gamma_max = |vs2|/(2 sqrt(B))`, and vanishes at `k_cut = sqrt(2) k0`.
 From `t0 = 1.38 fm/c`, `k0 = 2.0 fm^-1`: `B = (1/t0)^2/k0^4 = 0.03282 fm^2`, `|vs2| = 2 B k0^2 = 0.2626`, `|vs| = 0.5124`.
+
+## 13. Cooper-Frye sampler (`include/spf/particlisation/`, WP10b)
+
+Particle number of a species across a surface element: dN = g/(2 pi)^3 f(E*) max(p*.dSigma*, 0)/E* d^3p*, with the LRF quantities dSigma*_0 = u^mu dSigma_mu, |dSigma*_vec|^2 = dSigma*_0^2 - dSigma_mu dSigma^mu,
+the candidate bound dSigma_max = |dSigma*_0| + |dSigma*_vec| and the acceptance probability max(p*.dSigma*, 0)/(E* dSigma_max); the hadron phase of the equation of state (nucleons with mu_0 = mu_B - dw/drho, pions; mean field w(rho)) is as in `docs/eos_finite_T.md`. Full description: `docs/particlisation_format.md`.
