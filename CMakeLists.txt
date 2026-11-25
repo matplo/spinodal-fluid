@@ -24,12 +24,20 @@ add_library(spf
   src/linear/dispersion.cpp
   src/linear/amplification.cpp
   src/initial_state.cpp
+  src/particlisation/thermal.cpp
+  src/particlisation/surface.cpp
+  src/particlisation/species.cpp
+  src/particlisation/sampler.cpp
 )
 target_include_directories(spf PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 target_link_libraries(spf PUBLIC Kokkos::kokkos nlohmann_json::nlohmann_json)
+find_package(OpenMP COMPONENTS CXX)
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(spf PUBLIC OpenMP::OpenMP_CXX)
+endif()
 target_compile_definitions(spf PUBLIC SPF_DEFAULT_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/config/defaults.json")
 
 add_executable(spf_info apps/spf_info.cpp)
@@ -57,6 +65,9 @@ target_compile_definitions(spf_growth PRIVATE SPF_SOURCE_DIR="${CMAKE_CURRENT_SO
 
 add_executable(spf_linear apps/spf_linear.cpp)
 target_link_libraries(spf_linear PRIVATE spf)
+
+add_executable(spf_sample apps/spf_sample.cpp)
+target_link_libraries(spf_sample PRIVATE spf)
 
 if(SPF_BUILD_TESTS)
   enable_testing()
