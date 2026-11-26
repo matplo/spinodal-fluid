@@ -32,10 +32,11 @@ nlohmann::json read_json(const std::string& path) {
 }
 
 // Small box: 24 fm cube, 3 A GeV Glauber nucleons of width 1 fm; cold-thermal two-phase EoS (no table needed).
+// WP10e: particlisation.corona.mode = thermal (the behaviour these tests were written for): the default core_corona needs a reference EoS table.
 int run_driver(const std::string& out, const std::string& extra, const std::string& dx, const char* log = "driver.log") {
   const std::string cmd = std::string("\"") + SPF_COLLIDE_EXE + "\" --out " + out + " --config " + SPF_SOURCE_DIR +
                           "/config/collisions/common.json ic.generator=glauber_gaussians ic.e_lab_gev=3 eos.model=cold_thermal_two_phase" +
-                          " grid.dx_fm=" + dx + " grid.Lx_fm=24 grid.Ly_fm=24 grid.Lz_fm=24 run.n_events=1 " + extra + " > " + out + "/" + log + " 2>&1";
+                          " grid.dx_fm=" + dx + " grid.Lx_fm=24 grid.Ly_fm=24 grid.Lz_fm=24 run.n_events=1 particlisation.corona.mode=thermal " + extra + " > " + out + "/" + log + " 2>&1";
   const int st = std::system(cmd.c_str());
   return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
 }
