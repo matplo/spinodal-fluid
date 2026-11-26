@@ -15,6 +15,7 @@ add_executable(spf_tests
   test_collide.cpp
   test_surface.cpp
   test_sampler.cpp
+  test_corona.cpp
 )
 target_link_libraries(spf_tests PRIVATE spf doctest::doctest)
 target_compile_definitions(spf_tests PRIVATE SPF_SOURCE_DIR="${PROJECT_SOURCE_DIR}" SPF_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")

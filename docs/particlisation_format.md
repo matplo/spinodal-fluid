@@ -112,7 +112,10 @@ At `t_init` every cell with `0 < eps < eps_sw` gives an element with `dSigma_mu 
 (`particlisation.initial_slice = remove`, default) is set to vacuum, so that every bit of energy, momentum and baryon number leaves the fluid
 exactly once (decision S23). The alternative `keep` leaves those cells in the fluid; the surface integral then still counts every bit once,
 because matter that later flows back into the region `eps >= eps_sw` crosses the surface inwards (negative contributions) before it leaves again.
-Passing the original SMASH hadrons of those cells through to the afterburner instead is not implemented.
+Passing the original SMASH hadrons of those cells through to the afterburner instead is the corona mode `core_corona` of Sect. 9 (WP10e).
+`particlisation.initial_slice = auto` (default) follows `particlisation.corona.mode`: `thermal` and `core_corona` give `remove`, `keep` gives
+`defer` (Sect. 9.3). The explicit values `remove` (= mode `thermal`), `keep` (legacy: slice emitted at `t_init` and the cells stay in the fluid) and `defer`
+override the mode; `remove` and `keep` are kept for the existing tests and are deprecated in favour of `particlisation.corona.mode`.
 
 ### 2.4 Rest-frame state of an element
 
@@ -139,7 +142,11 @@ stored state (the format fixes `T^{mu nu}` with `p0`); the conserved fields of t
 |---|---|---|---|
 | `particlisation.enabled` | false (`config/collisions/common.json`: true) | true | write the surface in `spf_collide`; the event then runs until no cell has `eps >= eps_sw` (cap `run.t_max_after_init_fm`, 30 fm/c in the collision files) |
 | `particlisation.eps_sw_eps_s` | 4.0 | 5.0 (`config/collisions/eps_sw_5.json`), any positive value | switching energy density in units of `eps_s = m_N rho_s` |
-| `particlisation.initial_slice` | `remove` | `keep` | Sect. 2.3 |
+| `particlisation.initial_slice` | `auto` | `remove`, `keep`, `defer` | Sect. 2.3 (deprecated alias of the corona mode, Sect. 9) |
+| `particlisation.final_slice` | `auto` (on for `defer`) | `on`, `off` | Sect. 9.3 |
+| `particlisation.corona.mode` | `core_corona` | `thermal`, `keep` | Sect. 9 (decision S31) |
+| `particlisation.corona.reference_eos` | `table_two_phase` | any `eos.model` with a table | equation of state of the core/corona classification |
+| `particlisation.corona.reference_table_path` | "" | path | table of the reference equation of state ("": the run's table if the models agree, else the default table of the model) |
 | `particlisation.surface.method` | `isoenergy` | `isochronous` | Sect. 2.1, 2.2 |
 | `particlisation.surface.isochronous_times_fm` | [] | list of fluid times after `t_init` | isochronous method |
 | `particlisation.surface.isochronous_cells` | `all` | `above_eps_sw` | Sect. 2.2 |
@@ -252,7 +259,7 @@ Failed samples are omitted from the OSCAR file and flagged in the JSON.
 ## 6. Configuration keys (block `sampler`, `config/defaults.json`; default marked \* in the decision register, `docs/decisions_spinodal.md` S24 - S30)
 
 `surface` (base path), `output_prefix`, `species`, `quantum_statistics` (true\*; false = Boltzmann), `nucleon_mass_GeV` 0.940, `pion_mass_GeV` 0.140, `mean_field_K_MeV` 300, `hrg_particles_file`, `hrg_max_mass_GeV`,
-`conservation`, `global_method`, `charge_Z`, `charge_A`, `mu_rule` (rho_matched\*, table), `mu_T_floor_GeV` (0.005), `spline_policy`, `spline_tol_rel`, `spline_tol_abs_fm3`, `T_min_GeV`, `position`, `sort_by_time`, `n_samples`, `seed`, `quad_nodes`, `max_trials`, `max_label_trials`, `threads`.
+`corona` (`append`\*, `omit`; Sect. 9.2), `conservation`, `global_method`, `charge_Z`, `charge_A`, `mu_rule` (rho_matched\*, table), `mu_T_floor_GeV` (0.005), `spline_policy`, `spline_tol_rel`, `spline_tol_abs_fm3`, `T_min_GeV`, `position`, `sort_by_time`, `n_samples`, `seed`, `quad_nodes`, `max_trials`, `max_label_trials`, `threads`.
 
     spf_sample --surface <base> --out <dir> [--config file] [--override file] [sampler.key=value ...]
 
@@ -269,3 +276,65 @@ Failed samples are omitted from the OSCAR file and flagged in the JSON.
 `tools/particlisation/g5_endtoend.sh BUILD_DIR OSCAR_FILE [FIRST N K THREADS]` runs `spf_collide` (surface on, `config/collisions/common.json`) for two EoS tables and `spf_sample` with both mu rules on the same surfaces; `tools/particlisation/g5_analyse.py ROOT --json OUT --fig OUT.png`
 reads the result (multiplicities, B and Q exactness, E and P balance, initial-slice fraction, timings, OSCAR2013 parse check). First measurement: `docs/validation.md`, G5-INT. A surface of a 3 A GeV event at dx = 0.2 fm has 1.2 million elements and is 148 - 156 MB.
 **Production runs must sample in place and not keep surfaces**: run `spf_sample` directly on the file written by `spf_collide` and delete `<base>.surface.bin` afterwards (keep the small `.surface.json` and the sampler output); the driver script deletes the `.bin` files after both mu rules have been sampled.
+
+## 9. Treatment of the matter below the switching density at the start (corona), decision S31, WP10e
+
+About 70 % of the particles of a 3 A GeV event come from the initial slice (cells with `eps < eps_sw` at `t_init`, emitted at once, S23): they never see the
+fluid evolution, are the same for every equation of state and dilute the equation-of-state signal. One key selects the treatment for the whole chain
+(initial state -> fluid -> surface -> sampler): `particlisation.corona.mode`.
+
+| mode | initial state | fluid | surface file | sampler |
+|---|---|---|---|---|
+| `core_corona` (default) | classification of every SMASH hadron, only the core hadrons are deposited | as before | initial slice = thin Gaussian tails of the core deposition below `eps_sw` (S23); sidecar block `corona` | corona hadrons appended (`sampler.corona = append`) |
+| `thermal` | all hadrons deposited | initial slice removed (S23) | initial slice at `t_init` | thermal sampling of everything |
+| `keep` | all hadrons deposited | cells stay in the fluid, nothing emitted at `t_init` | surface + final isochronous slice | thermal sampling of everything |
+
+### 9.1 `core_corona`
+
+All hadrons of the SMASH list are deposited as before; `eps` is recovered in every cell with the reference equation of state
+(`particlisation.corona.reference_eos`, default `table_two_phase`; the finite-range gradient term does not act at `t_init`), interpolated trilinearly to each hadron
+position (hadrons more than half a cell outside the box get 0), and the hadron is a corona hadron when `eps(x_i) < eps_sw` (the same `eps_sw` as the surface).
+The reference equation of state is fixed so that the split of an event is the same for every equation of state of a paired event (two-phase and Maxwell runs of the
+same SMASH event contain the same hadrons in the corona): the recovery `eps = E - M v` depends on the pressure of the equation of state, a recovery with the equation
+of state of the run would move hadrons near the threshold between the two runs. Only the core hadrons are then deposited again (same Gaussians, same momentum limiter) and
+evolved. The core deposition still has Gaussian tails below `eps_sw`: they form an initial slice that is emitted thermally at `t_init` as in S23 (its share is reported in
+`summary.json`/the sidecar as `core_tail_slice_*`, in the comparison json as `core_tail_slice_E_over_core_deposit`). Conservation:
+`sum(corona hadrons) + deposition of the core = sum(all hadrons)` to rounding, and the sidecar closure (elements + inside - deposited core) is the closure of the fluid part only.
+
+Corona file `<base>.corona.oscar`: OSCAR2013, same columns as the sampler output, one block `# event <id> ensemble 0 out N`; SMASH species, positions, times (the OSCAR time of
+the block used for the initial state), momenta and charges are written unchanged, in the order of the input list; `ID` is the SMASH ID. The sidecar block `corona` holds
+`mode`, `applied`, `reference_eos`, `eps_sw_GeV_fm3`, `n_particles_total`, `n_core`, `n_corona`, `corona` and `core` (each `n`, `E_GeV`, `Px_GeV`, `Py_GeV`, `Pz_GeV`, integer `B`, integer `Q`),
+`corona_species_pdg` (counts per PDG code), `deposited_all_E_GeV/B`, `deposited_core_E_GeV/B`, `file`. `summary.json` repeats the block (`corona`) and has `wall_corona_s`.
+
+### 9.2 Sampler with corona (`sampler.corona`)
+
+`append` (default): when the sidecar reports `corona.n_corona > 0`, `spf_sample` reads `<surface base>.corona.oscar` (the count must equal `n_corona`) and appends the same list
+to every sample of the event (the corona is one realisation per event, identical in the K samples; this is deliberate: it carries no equation-of-state signal and no
+sampling fluctuation). `omit` leaves it out. The conservation of B and Q (`sampler.conservation = global_B_Q`) applies to the thermal part with the targets from the surface
+integral only: `B_target = round(Int N.dSigma)`, `Q_target = round(B_target Z/A)`. Marking: OSCAR2013 has no room for an extra column or block, so the corona particles are the
+last ones of each event block and the summary json says where: per sample `corona = {appended, n, first_index, end_index (exclusive), sum {E, Px, Py, Pz, B, Q}, counts_pdg}`,
+`thermal_range = {first_index, end_index}`, `event_totals` (thermal + corona sums), `n_particles_total`; the entries `sum`, `targets`, `counts`, `mismatch_sampled_minus_surface` remain those of the thermal part.
+`ID` of the appended particles continues after the thermal ids (the SMASH IDs stay in the corona file). The export to HDF5/npz planned later has to store the same index range.
+`<out>/<prefix>.json` gets the top-level block `corona = {mode, n_corona_sidecar, n_appended}`.
+
+### 9.3 `keep` (deferred initial slice and final slice)
+
+The existing value `particlisation.initial_slice = keep` emits the initial slice at `t_init` *and* keeps the cells in the fluid: every bit of energy and baryon number is emitted once
+(closure second order, -2.4e-3 at dx = 0.2 fm, WP10a), nothing is left unemitted and no final slice is needed; but the particles of the slice are still produced at `t_init`, so it does not
+change the 70 % problem. The corona mode `keep` is therefore the deferred variant `initial_slice = defer`: the initial slice is *not* emitted, the cells stay in the fluid, and the matter
+that never crossed the iso-energy surface is emitted by a final isochronous slice at the end of the run (`particlisation.final_slice = auto` = on for `defer`; `on` is rejected with an
+initial slice emitted at `t_init`, because the matter would be counted twice). Cells that stay below `eps_sw` for the whole run never cross the surface, so without a final slice their
+energy and baryon number would be lost.
+
+At the end the grid is not empty: it also holds the matter that crossed the surface outward and is already emitted there. A final slice of all cells would count it twice. The
+final slice therefore emits every cell with `eps > 0` with the weight `w = (E_grid - E_surface) / E_grid` (`dSigma = w (dV, 0, 0, 0)`, `E_grid` the energy on the grid at that time,
+`E_surface` the net energy through the iso-energy surface including the inflow part), i.e. it assumes that the unemitted matter and the already emitted matter are mixed in the same proportion in every
+cell. The energy then closes by construction (the closure is the loss to the box boundary and the vacuum cut); the baryon number closes up to the difference between
+`w_E` and `w_B = (B_grid - B_surface) / B_grid`, which is reported (`final_slice_info.weight_E`, `weight_B`) and measured in `docs/validation.md` (WP10e). The elements of the final slice
+are at the end time of the run (`final_slice_info.time_fm`); the sidecar keys `n_elements_final_slice`, `totals_final_slice`, `methods_in_file.final_slice` are new and `n_elements`
+includes them; the file order is: initial slice, surface, final slice.
+
+### 9.4 Lower switching densities
+
+`particlisation.eps_sw_eps_s` (already a key) at 3 or 2: `config/collisions/eps_sw_3.json`, `eps_sw_2.json`. The surface then lies partly on the hadron branch of the equation of state;
+the share of the flux in the spline region of the two-phase construction is reported by `tools/particlisation/census.py` (`docs/validation.md`, WP10e).
