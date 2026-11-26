@@ -259,3 +259,47 @@ tools/collisions/stage_b.sh --bin build/cuda-turing75 --smash <smash>/smash --ou
 tools/collisions/stageb_table.py --agg-root . --runs-root runs --energies 1 2 3 4 5 6 --out stageb_tables --paper tools/data
 tools/collisions/followup_s3_scan.py --runs-root runs --nev 200 --paper tools/data --out-prefix s3 --boot 20000
 ```
+
+
+## 15. Particlisation surface (WP10a)
+
+`config/collisions/common.json` switches the switching surface on (`particlisation.enabled = true`, eps_sw = 4 eps_s); the file format and the
+construction are in `docs/particlisation_format.md`, the keys in decision S23. With the surface on, `spf_collide`
+
+* emits the initial slice at `t_init` (cells with 0 < eps < eps_sw) and sets those cells to vacuum before the first record of the observables
+  (the observables therefore describe the fluid that is evolved; `baryon_leaving_fraction` and `energy_leaving_fraction` are relative to the state
+  after the removal, the summary keeps the deposited totals in `baryon_on_grid_initial`, `energy_on_grid_initial_GeV`);
+* runs each event until no cell has eps >= eps_sw (status `fluid_end`), whatever `run.stop_at_fluid_end` says; `run.t_max_after_init_fm` (30 fm/c in
+  `common.json`) is the cap: an event that reaches it ends with status `t_max`, `particlisation.closed = false` and a line
+  `surface not closed at t_max` in the log;
+* writes `event_NNN/event_NNN.surface.bin` and `.surface.json` and a block `particlisation` in `summary.json` (element counts, closure, end time,
+  wall time of the surface finder).
+
+`config/collisions/stage_a.json` sets `particlisation.enabled = false` (Stage A and the Stage B scripts are unchanged: fixed 6 fm/c, no removal).
+
+```sh
+CF="--config config/collisions/common.json --config config/collisions/e3.json --config config/collisions/t_init_fixed.json"
+# eps_sw = 4 eps_s (default) and 5 eps_s, two-phase and Maxwell tables, 20 events of the 3 A GeV SMASH file
+build/cuda-turing75/spf_collide --out runs/two_phase_sw4 $CF ic.oscar_path=$OSC eos.model=table_two_phase run.n_events=20
+build/cuda-turing75/spf_collide --out runs/two_phase_sw5 $CF --config config/collisions/eps_sw_5.json ic.oscar_path=$OSC eos.model=table_two_phase run.n_events=20
+# isochronous cross-check at 2, 4 and 6 fm/c after t_init (one file pair per time)
+build/cuda-turing75/spf_collide --out runs/iso $CF ic.oscar_path=$OSC eos.model=table_two_phase run.n_events=1 \
+    particlisation.surface.method=isochronous 'particlisation.surface.isochronous_times_fm=[2.0,4.0,6.0]'
+# census (numpy only) and figures (matplotlib)
+tools/particlisation/census.py --run two_phase_sw4=runs/two_phase_sw4 --run maxwell_sw4=runs/maxwell_sw4 ... \
+    --table table_two_phase=data/eos/generated/eos_two_phase --table table_maxwell=data/eos/generated/eos_maxwell \
+    --ab tools/particlisation/data/ab_two_phase.json --out census [--delete-bin]
+tools/particlisation/census_plot.py --census census --ab tools/particlisation/data/ab_two_phase.json --out census/plots
+# closure versus dx on the Glauber-Gaussians state (24 fm box, test table)
+tools/particlisation/closure_convergence.py --exe build/cuda-turing75/spf_collide --out conv --dx 0.4 0.2 0.1
+```
+
+Disk: a 3 A GeV event at dx = 0.2 fm writes about 1.2 million elements, 156 MB (of which 80 % is the initial slice); `census.py --delete-bin`
+removes each file after reading it. Measured cost and memory: `docs/validation.md`, WP10a, A8.
+
+
+## 16. Particles from the surface (G5-INT)
+
+`spf_sample --surface event_NNN/event_NNN [--out DIR] sampler.n_samples=K sampler.mu_rule=rho_matched ...` converts the surface of one event into K OSCAR2013 particle lists (`docs/particlisation_format.md`, Sect. 4 - 5; keys in decision S24 - S30).
+`tools/particlisation/g5_endtoend.sh` runs the whole chain for events of the 3 A GeV file with both EoS tables and both mu rules; first numbers in `docs/validation.md` (G5-INT). Sample in place and delete the surface `.bin` afterwards (Sect. 8 of the format document).
+

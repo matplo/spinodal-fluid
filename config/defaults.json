@@ -131,5 +131,47 @@
     "toy_T_c_MeV": 142.5,
     "toy_mass_GeV": 0.94,
     "toy_cv0": 1.5
+  },
+  "particlisation": {
+    "enabled": false,
+    "eps_sw_eps_s": 4.0,
+    "initial_slice": "remove",
+    "surface": {
+      "method": "isoenergy",
+      "isochronous_times_fm": [],
+      "isochronous_cells": "all",
+      "first_level": "before_removal",
+      "interpolation": "conserved",
+      "output_dir": ""
+    }
+  },
+  "sampler": {
+    "surface": "",
+    "output_prefix": "sampled",
+    "species": "eos_consistent",
+    "quantum_statistics": true,
+    "nucleon_mass_GeV": 0.940,
+    "pion_mass_GeV": 0.140,
+    "mean_field_K_MeV": 300.0,
+    "hrg_particles_file": "",
+    "hrg_max_mass_GeV": 0.0,
+    "conservation": "global_B_Q",
+    "global_method": "exact_counts",
+    "charge_Z": 82.0,
+    "charge_A": 208.0,
+    "spline_policy": "use_table",
+    "mu_rule": "rho_matched",
+    "mu_T_floor_GeV": 0.005,
+    "spline_tol_rel": 0.02,
+    "spline_tol_abs_fm3": 1e-6,
+    "T_min_GeV": 0.001,
+    "position": "cell_uniform",
+    "sort_by_time": true,
+    "n_samples": 1,
+    "seed": 12345,
+    "quad_nodes": 16,
+    "max_trials": 200000,
+    "max_label_trials": 1000000,
+    "threads": 0
   }
 }
