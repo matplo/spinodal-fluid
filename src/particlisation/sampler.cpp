@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <map>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
@@ -721,6 +723,56 @@ void write_oscar2013(std::ostream& os, const std::vector<SampleResult>& samples,
     }
     os << "# event " << s << " ensemble 0 end 0 impact   0.000 scattering_projectile_target yes\n";
   }
+}
+
+std::vector<Particle> read_corona_oscar(const std::string& path) {
+  std::ifstream in(path);
+  if (!in) throw std::runtime_error("cannot open corona file '" + path + "'");
+  std::vector<Particle> out;
+  std::string line;
+  while (std::getline(in, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    std::istringstream is(line);
+    Particle p{};
+    long long pdg = 0, id = 0;
+    int ch = 0;
+    if (!(is >> p.t >> p.x >> p.y >> p.z >> p.m >> p.p0 >> p.px >> p.py >> p.pz >> pdg >> id >> ch))
+      throw std::runtime_error("malformed corona line in '" + path + "'");
+    p.pdg = static_cast<int>(pdg);
+    p.charge = ch;
+    p.baryon = pdg_baryon(pdg);
+    p.species = -1;
+    p.id = static_cast<int>(id);
+    out.push_back(p);
+  }
+  return out;
+}
+
+void append_corona(SampleResult& r, const std::vector<Particle>& corona) {
+  if (!r.ok) return;
+  const std::size_t first = r.particles.size();
+  int next_id = 0;
+  for (const auto& p : r.particles) next_id = std::max(next_id, p.id + 1);
+  double cE = 0, cx = 0, cy = 0, cz = 0;
+  long long cB = 0, cQ = 0;
+  std::map<int, long long> counts;
+  for (auto p : corona) {
+    p.id = next_id++;
+    cE += p.p0; cx += p.px; cy += p.py; cz += p.pz;
+    cB += p.baryon; cQ += p.charge;
+    counts[p.pdg] += 1;
+    r.particles.push_back(p);
+  }
+  nlohmann::json cj = nlohmann::json::object();
+  for (const auto& kv : counts) cj[std::to_string(kv.first)] = kv.second;
+  r.summary["corona"] = {{"appended", true}, {"n", corona.size()}, {"first_index", first}, {"end_index", r.particles.size()},
+                         {"sum", {{"E_GeV", cE}, {"Px_GeV", cx}, {"Py_GeV", cy}, {"Pz_GeV", cz}, {"B", cB}, {"Q", cQ}}}, {"counts_pdg", cj}};
+  const auto& s = r.summary["sum"];
+  r.summary["thermal_range"] = {{"first_index", 0}, {"end_index", first}};
+  r.summary["event_totals"] = {{"E_GeV", s["E_GeV"].get<double>() + cE}, {"Px_GeV", s["Px_GeV"].get<double>() + cx},
+                               {"Py_GeV", s["Py_GeV"].get<double>() + cy}, {"Pz_GeV", s["Pz_GeV"].get<double>() + cz},
+                               {"B", s["B"].get<long long>() + cB}, {"Q", s["Q"].get<long long>() + cQ}};
+  r.summary["n_particles_total"] = r.particles.size();
 }
 
 }  // namespace spf::particlisation

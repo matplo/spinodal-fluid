@@ -135,7 +135,13 @@
   "particlisation": {
     "enabled": false,
     "eps_sw_eps_s": 4.0,
-    "initial_slice": "remove",
+    "initial_slice": "auto",
+    "final_slice": "auto",
+    "corona": {
+      "mode": "core_corona",
+      "reference_eos": "table_two_phase",
+      "reference_table_path": ""
+    },
     "surface": {
       "method": "isoenergy",
       "isochronous_times_fm": [],
@@ -148,6 +154,7 @@
   "sampler": {
     "surface": "",
     "output_prefix": "sampled",
+    "corona": "append",
     "species": "eos_consistent",
     "quantum_statistics": true,
     "nucleon_mass_GeV": 0.940,

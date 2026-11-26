@@ -44,6 +44,21 @@ int main(int argc, char** argv) {
     const auto t1 = std::chrono::steady_clock::now();
     const int n = cfg.get<int>("sampler.n_samples");
     auto res = sampler.sample_all(n);
+    // corona hadrons (WP10e): appended to every sample when sampler.corona = append and the surface sidecar reports a corona
+    const std::string corona_mode = cfg.get<std::string>("sampler.corona");
+    if (corona_mode != "append" && corona_mode != "omit") throw spf::ConfigError("sampler.corona must be 'append' or 'omit', got '" + corona_mode + "'");
+    long n_corona_sidecar = 0;
+    {
+      const auto& m = sampler.surface().meta;
+      if (m.contains("corona") && m["corona"].is_object() && m["corona"].contains("n_corona")) n_corona_sidecar = m["corona"]["n_corona"].get<long>();
+    }
+    std::vector<sp::Particle> corona;
+    if (corona_mode == "append" && n_corona_sidecar > 0) {
+      corona = sp::read_corona_oscar(sp::corona_path(surface));
+      if (static_cast<long>(corona.size()) != n_corona_sidecar)
+        throw std::runtime_error("corona file holds " + std::to_string(corona.size()) + " hadrons, the surface sidecar reports " + std::to_string(n_corona_sidecar));
+      for (auto& r : res) sp::append_corona(r, corona);
+    }
     const auto t2 = std::chrono::steady_clock::now();
     const std::string prefix = out + "/" + cfg.get<std::string>("sampler.output_prefix");
     {
@@ -56,6 +71,7 @@ int main(int argc, char** argv) {
     j["threads"] = sp::max_threads();
     j["seconds_preparation"] = std::chrono::duration<double>(t1 - t0).count();
     j["seconds_sampling"] = std::chrono::duration<double>(t2 - t1).count();
+    j["corona"] = {{"mode", corona_mode}, {"n_corona_sidecar", n_corona_sidecar}, {"n_appended", corona.size()}};
     j["samples"] = nlohmann::json::array();
     int nfail = 0;
     for (auto& r : res) {

@@ -92,6 +92,13 @@ OscarFile read_oscar2013(const std::string& path) {
       throw std::runtime_error(path + ":" + std::to_string(lineno) + ": malformed particle line");
     }
     p.B = baryon_number_from_pdg(p.pdg);
+    try {
+      if (col.count("mass") && col["mass"] < static_cast<int>(w.size())) p.mass = std::stod(w[col["mass"]]);
+      if (col.count("ID") && col["ID"] < static_cast<int>(w.size())) p.id = std::stol(w[col["ID"]]);
+      if (col.count("charge") && col["charge"] < static_cast<int>(w.size())) p.charge = std::stoi(w[col["charge"]]);
+    } catch (const std::exception&) {
+      throw std::runtime_error(path + ":" + std::to_string(lineno) + ": malformed particle line (mass, ID or charge)");
+    }
     if (cur->particles.empty()) cur->time = p.t;
     cur->particles.push_back(p);
   }
@@ -406,6 +413,7 @@ InitialState build_initial_state(const Config& cfg, const Grid& grid) {
   dp.gamma_cm = st.kin.gamma_cm;
   const auto o = centred_origin(grid);
   dp.origin[0] = o[0]; dp.origin[1] = o[1]; dp.origin[2] = o[2];
+  st.dep_params = dp;
   std::vector<Particle> parts;
   if (st.generator == "smash_cascade" || st.generator == "oscar_file") {
     const std::string path = cfg.get<std::string>("ic.oscar_path");
@@ -435,6 +443,7 @@ InitialState build_initial_state(const Config& cfg, const Grid& grid) {
       if (d > 0.0 && p.E + p.pz > 0.0 && std::fabs(0.5 * std::log((p.E + p.pz) / d)) < 0.5) st.baryon_y_window += p.B;
     }
     st.dep = deposit_particles(grid, dp, parts);
+    st.particles = parts;
     const Real lim = cfg.get<Real>("ic.max_outside_fraction");
     if (std::fabs(st.dep.outside_fraction_B) > lim)
       throw std::runtime_error("baryon number outside the box: fraction " + std::to_string(st.dep.outside_fraction_B) +
@@ -442,6 +451,33 @@ InitialState build_initial_state(const Config& cfg, const Grid& grid) {
   }
   st.limiter_cells = limit_momentum(grid, st.dep);
   return st;
+}
+
+}  // namespace spf
+
+namespace spf {
+
+void redeposit_subset(const Config& cfg, const Grid& grid, InitialState& st, const std::vector<char>& keep) {
+  if (keep.size() != st.particles.size()) throw std::runtime_error("redeposit_subset: mask size differs from the particle list");
+  std::vector<Particle> sub;
+  st.baryon_total = 0.0;
+  st.baryon_y_window = 0.0;
+  for (size_t i = 0; i < keep.size(); ++i) {
+    if (!keep[i]) continue;
+    const Particle& p = st.particles[i];
+    sub.push_back(p);
+    if (p.B == 0) continue;
+    st.baryon_total += p.B;
+    const Real d = p.E - p.pz;
+    if (d > 0.0 && p.E + p.pz > 0.0 && std::fabs(0.5 * std::log((p.E + p.pz) / d)) < 0.5) st.baryon_y_window += p.B;
+  }
+  st.n_hadrons = static_cast<long>(sub.size());
+  st.dep = deposit_particles(grid, st.dep_params, sub);
+  const Real lim = cfg.get<Real>("ic.max_outside_fraction");
+  if (std::fabs(st.dep.outside_fraction_B) > lim)
+    throw std::runtime_error("baryon number outside the box (core particles): fraction " + std::to_string(st.dep.outside_fraction_B) +
+                             " exceeds ic.max_outside_fraction");
+  st.limiter_cells = limit_momentum(grid, st.dep);
 }
 
 }  // namespace spf

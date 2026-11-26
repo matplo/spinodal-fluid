@@ -11,6 +11,7 @@
 // cell has eps >= eps_sw (cap run.t_max_after_init_fm) and the surface is written to event_NNN/event_NNN.surface.{bin,json}
 // (docs/particlisation_format.md).
 // Documentation: docs/running_collisions.md.
+#include "spf/corona.hpp"
 #include "spf/eos/dispatch.hpp"
 #include "spf/hydro3d.hpp"
 #include "spf/initial_state.hpp"
@@ -25,6 +26,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -106,8 +108,48 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
   try {
     // ------------------------------------------------------------ initial state
     const auto t_ic = Clock::now();
-    const spf::InitialState st = spf::build_initial_state(cfg, grid);
+    spf::InitialState st = spf::build_initial_state(cfg, grid);
     const Real v3 = grid.dx * grid.dx * grid.dx;
+    // ------------------------------------------------------------ corona (WP10e, decision S31): core/corona split before the deposition
+    const spf::ParticlisationParams pp = spf::ParticlisationParams::from_config(cfg);
+    const spf::CoronaParams cp = spf::CoronaParams::from_config(cfg);
+    nlohmann::json corona_json = {{"mode", cp.mode_name()}, {"applied", false}, {"n_corona", 0}};
+    if (pp.enabled && cp.mode == spf::CoronaMode::CoreCorona) {
+      const auto t_cor = Clock::now();
+      if (st.particles.empty()) throw std::runtime_error("particlisation.corona.mode = core_corona needs a hadron list (ic.generator smash_cascade, oscar_file or glauber_gaussians)");
+      spf::Config rc = cfg;
+      const std::string ref_model = cp.reference_eos;
+      const bool same_model = ref_model == cfg.get<std::string>("eos.model");
+      std::string ref_table = cfg.get<std::string>("particlisation.corona.reference_table_path");
+      rc.set_from_string("eos.model=" + ref_model);
+      if (!ref_table.empty()) rc.set_from_string("eos.table_path=" + nlohmann::json(ref_table).dump());
+      else if (!same_model) rc.set_from_string("eos.table_path=\"\"");
+      resolve_eos_paths(rc, SPF_SOURCE_DIR);
+      spf::CoronaSplit split;
+      spf::with_eos(rc, SPF_SOURCE_DIR, [&](const auto& er) { split = spf::classify_corona(cfg, grid, st, er, pp.eps_sw()); });
+      const std::string odir0 = pp.output_dir.empty() ? edir : pp.output_dir;
+      std::filesystem::create_directories(odir0);
+      const std::string cpath = odir0 + "/" + event_dir_name(id) + ".corona.oscar";
+      spf::write_corona_oscar(cpath, st.particles, split.is_core, id, "spf_collide corona hadrons (WP10e): SMASH hadrons with eps(x_i) < eps_sw at t_init");
+      const spf::DepositResult all_dep = st.dep;  // deposition of the full list (classification state)
+      const double E_all_grid = all_dep.grid.E, B_all_grid = all_dep.grid.B;
+      spf::redeposit_subset(cfg, grid, st, split.is_core);
+      std::map<long, long> species;
+      for (size_t i = 0; i < st.particles.size(); ++i) if (!split.is_core[i]) species[st.particles[i].pdg] += 1;
+      nlohmann::json sp = nlohmann::json::object();
+      for (const auto& kv : species) sp[std::to_string(kv.first)] = kv.second;
+      const spf::CoronaTotals all = spf::corona_totals(st.particles, split.is_core, true);
+      corona_json = {{"mode", cp.mode_name()}, {"applied", true}, {"reference_eos", ref_model}, {"eps_sw_GeV_fm3", pp.eps_sw()},
+                     {"n_particles_total", static_cast<long>(st.particles.size())}, {"n_core", split.core.n}, {"n_corona", split.corona.n},
+                     {"corona", spf::corona_totals_json(split.corona)}, {"core", spf::corona_totals_json(split.core)},
+                     {"corona_species_pdg", sp}, {"file", event_dir_name(id) + ".corona.oscar"},
+                     {"deposited_all_E_GeV", E_all_grid}, {"deposited_all_B", B_all_grid},
+                     {"deposited_core_E_GeV", st.dep.grid.E}, {"deposited_core_B", st.dep.grid.B},
+                     {"corona_index_comment", "hadron order of the OSCAR input list; corona.oscar keeps that order"}};
+      (void)all;
+      J["wall_corona_s"] = seconds_since(t_cor);
+    }
+    J["corona"] = corona_json;
     const spf::Hydro3DParams hp = spf::Hydro3DParams::from_config(cfg);
     spf::Hydro3D<EoS> h(eos, hp);
     h.set_conserved(st.dep.R, st.dep.Mx, st.dep.My, st.dep.Mz, st.dep.E);
@@ -129,7 +171,6 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
     const bool cell_diag = cfg.get<bool>("run.cell_diagnostics");
     h.track_vacuum = cell_diag;
     // ------------------------------------------------------------ particlisation surface (WP10a): initial slice before the first record
-    const spf::ParticlisationParams pp = spf::ParticlisationParams::from_config(cfg);
     std::unique_ptr<spf::SurfaceFinder<EoS>> sf;
     auto tot_ref = tot0;  // reference of the leaving fractions: the state that is evolved
     if (pp.enabled) {
@@ -281,14 +322,19 @@ nlohmann::json run_event(const spf::Config& cfg, const EoS& eos, int id, const s
                                {"vacuum_cut_removed_R_fraction_of_initial", h.vac_removed_R / R0}};
     }
     if (sf) {
+      const auto t_fin = Clock::now();
+      sf->final_slice(h);  // deferred initial slice (corona.mode = keep): emit what has not crossed the surface
+      const double wall_final = seconds_since(t_fin);
       nlohmann::json extra = {{"status", status}, {"steps", h.steps}, {"time_after_init_fm", h.time},
-                              {"t_max_after_init_fm", t_max}, {"hit_t_max", !sf->closed()}};
+                              {"t_max_after_init_fm", t_max}, {"hit_t_max", !sf->closed()}, {"corona", corona_json},
+                              {"corona_mode", cp.mode_name()}, {"wall_final_slice_s", wall_final}};
       sf->finish(h, extra);
       const auto& S = sf->summary(0);
       J["particlisation"] = {{"eps_sw_eps_s", pp.eps_sw_eps_s}, {"method", S["method"]}, {"closed", sf->closed()}, {"hit_t_max", !sf->closed()},
                              {"surface_file", sf->output_base(0) + ".surface.bin"}, {"n_outputs", sf->n_outputs()},
                              {"n_elements", S["n_elements"]}, {"n_elements_initial_slice", S["n_elements_initial_slice"]},
-                             {"n_elements_surface", S["n_elements_surface"]}, {"closure", S["closure"]},
+                             {"n_elements_surface", S["n_elements_surface"]}, {"n_elements_final_slice", S["n_elements_final_slice"]},
+                             {"initial_slice", S["initial_slice"]}, {"corona_mode", cp.mode_name()}, {"closure", S["closure"]},
                              {"end_time_after_init_fm", h.time}, {"wall_surface_s", sf->wall_s()},
                              {"diagnostics", S["diagnostics"]},
                              {"leaving_fractions_relative_to", "state after the initial slice was removed"},

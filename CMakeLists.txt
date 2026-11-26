@@ -24,6 +24,7 @@ add_library(spf
   src/linear/dispersion.cpp
   src/linear/amplification.cpp
   src/initial_state.cpp
+  src/corona.cpp
   src/particlisation/thermal.cpp
   src/particlisation/surface.cpp
   src/particlisation/species.cpp

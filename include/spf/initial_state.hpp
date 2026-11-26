@@ -20,6 +20,9 @@ struct Particle {
   Real E = 0, px = 0, py = 0, pz = 0;   // GeV
   long pdg = 0;
   int B = 0;                            // baryon number (baryon_number_from_pdg)
+  Real mass = 0;                        // GeV, OSCAR column "mass" (0 if the column is absent)
+  long id = 0;                          // OSCAR column "ID" (0 if absent)
+  int charge = 0;                       // OSCAR column "charge" in units of e (0 if absent)
 };
 
 // Baryon number from a PDG Monte Carlo id.
@@ -132,11 +135,18 @@ struct InitialState {
   Real baryon_total = 0, baryon_y_window = 0;   // baryon number of the input, and with |y| < 0.5 (y from E, pz of each baryon)
   DepositResult dep;
   long limiter_cells = 0;
+  std::vector<Particle> particles;  // the hadrons of the input list (empty for the analytic generator)
+  DepositParams dep_params;         // parameters used for the deposition (reused by redeposit_subset)
 };
 // ic.generator: "smash_cascade" / "oscar_file" (read ic.oscar_path, event ic.oscar_event, block time ic.oscar_time_fm),
 // "glauber_gaussians" (explicit fallback, never chosen silently), "analytic" (counter-streaming Woods-Saxon). Deposition with
 // ic.sigma_init_fm, ic.gaussian_contraction, ic.cutoff_sigma; the E >= |M| limiter is applied. Throws std::runtime_error when the
 // fraction of baryon number outside the box exceeds ic.max_outside_fraction.
 InitialState build_initial_state(const Config& cfg, const Grid& grid);
+
+// WP10e (core/corona split): replaces st.dep by the deposition of the particles with keep[i] != 0 only (same deposition parameters, momentum
+// limiter applied again); st.baryon_total, st.baryon_y_window and st.n_hadrons are those of the kept particles; st.particles is unchanged.
+// Throws std::runtime_error when keep has the wrong size or the outside fraction of baryon number exceeds ic.max_outside_fraction.
+void redeposit_subset(const Config& cfg, const Grid& grid, InitialState& st, const std::vector<char>& keep);
 
 }  // namespace spf

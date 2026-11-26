@@ -117,6 +117,17 @@ void write_oscar2013(std::ostream& os, const std::vector<SampleResult>& samples,
 // P(a, b, pp, pm | nN, nNb, Q) ~ Bin(a; nN, 1/2) Bin(b; nNb, 1/2) Pois(pp) Pois(pm) on a - b + pp - pm = Q). Returns false when the weight vanishes.
 bool draw_charge_counts(Rng& rng, long long nN, long long nNb, double mu_pi_ch, long long Q, long long& a, long long& b, long long& pp, long long& pm);
 
+// WP10e (decision S31): corona hadrons of the initial state (<surface base>.corona.oscar written by spf_collide, core_corona mode).
+// read_corona_oscar: the particles of the single event block (baryon number from the PDG rule, charge from the file).
+// append_corona: appends the same list to a sample (corona = one realisation per event, identical in every sample); ids continue after the
+// thermal ids; the summary gets "corona" = {n, first_index, end_index (exclusive), sum {E, P, B, Q}, counts} and "event_totals" (thermal +
+// corona sums).  The thermal sums, targets and mismatch entries of the summary are untouched (the conservation of B and Q applies to the
+// thermal part only).  A failed sample is left unchanged.
+std::vector<Particle> read_corona_oscar(const std::string& path);
+void append_corona(SampleResult& r, const std::vector<Particle>& corona);
+// Corona file belonging to a surface base: base + ".corona.oscar".
+inline std::string corona_path(const std::string& surface_base) { return surface_base + ".corona.oscar"; }
+
 // Threads used by the sampler's parallel loops (1 without OpenMP).
 void set_threads(int n);
 int max_threads();

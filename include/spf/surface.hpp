@@ -35,7 +35,12 @@ enum class SurfaceMethod { Isoenergy, Isochronous };
 enum class IsochronousCells { All, AboveEpsSw };
 enum class FirstLevel { BeforeRemoval, AfterRemoval };
 enum class SurfInterp { Conserved, Primitive };
-enum class InitialSlice { Remove, Keep };
+// Remove: initial slice emitted at t_init and removed from the fluid (S23, mode thermal and core_corona).
+// Keep:   initial slice emitted at t_init and the cells stay in the fluid (legacy value particlisation.initial_slice = keep; the matter is
+//         emitted once, at t_init, and also acts as a medium for the core).
+// Defer:  initial slice NOT emitted at t_init, the cells stay in the fluid; the matter that has not crossed the iso-energy surface is emitted
+//         by a final isochronous slice at the end of the run (corona mode keep, decision S31).
+enum class InitialSlice { Remove, Keep, Defer };
 
 struct ParticlisationParams {
   bool enabled = false;
@@ -46,6 +51,7 @@ struct ParticlisationParams {
   FirstLevel first_level = FirstLevel::BeforeRemoval;
   SurfInterp interp = SurfInterp::Conserved;
   InitialSlice initial_slice = InitialSlice::Remove;
+  bool final_slice = false;  // final isochronous slice at the end of the run (Defer only)
   std::string output_dir;
   Real eps_s = 0.94 * 0.153;  // m_N rho_s from constants.*
 
@@ -73,10 +79,24 @@ struct ParticlisationParams {
     if (ip == "conserved") p.interp = SurfInterp::Conserved;
     else if (ip == "primitive") p.interp = SurfInterp::Primitive;
     else throw ConfigError("particlisation.surface.interpolation must be 'conserved' or 'primitive', got '" + ip + "'");
+    // initial slice: "auto" follows particlisation.corona.mode (keep -> defer, otherwise remove); explicit values override
+    // ("remove" = mode thermal, "keep" = legacy emit-and-stay, "defer" = mode keep).
     const std::string is = cfg.get<std::string>("particlisation.initial_slice");
-    if (is == "remove") p.initial_slice = InitialSlice::Remove;
+    const std::string cm = cfg.get<std::string>("particlisation.corona.mode");
+    if (cm != "core_corona" && cm != "thermal" && cm != "keep")
+      throw ConfigError("particlisation.corona.mode must be 'core_corona', 'thermal' or 'keep', got '" + cm + "'");
+    if (is == "auto") p.initial_slice = cm == "keep" ? InitialSlice::Defer : InitialSlice::Remove;
+    else if (is == "remove") p.initial_slice = InitialSlice::Remove;
     else if (is == "keep") p.initial_slice = InitialSlice::Keep;
-    else throw ConfigError("particlisation.initial_slice must be 'remove' or 'keep', got '" + is + "'");
+    else if (is == "defer") p.initial_slice = InitialSlice::Defer;
+    else throw ConfigError("particlisation.initial_slice must be 'auto', 'remove', 'keep' or 'defer', got '" + is + "'");
+    const std::string fs = cfg.get<std::string>("particlisation.final_slice");
+    if (fs == "auto") p.final_slice = p.initial_slice == InitialSlice::Defer;
+    else if (fs == "on") p.final_slice = true;
+    else if (fs == "off") p.final_slice = false;
+    else throw ConfigError("particlisation.final_slice must be 'auto', 'on' or 'off', got '" + fs + "'");
+    if (p.final_slice && p.initial_slice != InitialSlice::Defer)
+      throw ConfigError("particlisation.final_slice = on needs the deferred initial slice (corona.mode = keep): with an initial slice emitted at t_init the matter would be counted twice");
     p.output_dir = cfg.get<std::string>("particlisation.surface.output_dir");
     if (!(p.eps_sw_eps_s > 0.0)) throw ConfigError("particlisation.eps_sw_eps_s must be positive");
     if (p.method == SurfaceMethod::Isochronous && p.isochronous_times_fm.empty())
@@ -374,6 +394,7 @@ struct CellElementsK {
   long cap;
   Kokkos::View<int***> flag;  // set to 1 for selected cells if flag_cells
   int flag_cells;
+  Real scale = 1.0;  // weight of the element: dSigma = scale (dV, 0, 0, 0)
   KOKKOS_INLINE_FUNCTION void operator()(const int i, const int j, const int k) const {
     const Real ec = eps(i, j, k);
     const bool sel = hi_inclusive_above ? (ec >= lo) : (ec > lo && ec < hi);
@@ -385,7 +406,7 @@ struct CellElementsK {
     const int fl = state_from_conserved(eos, R(i, j, k), Mx(i, j, k), My(i, j, k), Mz(i, j, k), E(i, j, k), e, rh, u);
     if (fl & 1) Kokkos::atomic_add(&errs(3), 1L);
     const Real X[4] = {t, org[0] + (i - g[0]) * dx, org[1] + (j - g[1]) * dx, org[2] + (k - g[2]) * dx};
-    const Real n[4] = {dx * dx * dx, 0.0, 0.0, 0.0};
+    const Real n[4] = {scale * dx * dx * dx, 0.0, 0.0, 0.0};
     write_record(eos, buf, r, X, n, u[0], u[1], u[2], e, rh);
   }
 };
@@ -503,6 +524,8 @@ class SurfaceFinder {
   SurfFlux flux_initial(size_t q = 0) const { return outs_.at(q).flux_initial; }
   SurfFlux flux_surface(size_t q = 0) const { return outs_.at(q).flux_surface; }
   SurfFlux totals_initial() const { return init_; }
+  SurfFlux flux_final(size_t q = 0) const { return outs_.at(q).flux_final; }
+  long n_final(size_t q = 0) const { return outs_.at(q).n_final; }
 
   void begin(Hydro3D<EoS>& h) {
     const auto t0 = clock_();
@@ -523,8 +546,9 @@ class SurfaceFinder {
                                    buf_, count_, errs_, cap_, flag, 1};
       Kokkos::parallel_for("surf_initial_slice", interior_policy(grid_), k);
     };
-    const long n0 = run_with_capacity(launch);
-    const SurfFlux fl = flux(n0);
+    const bool emit_initial = prm_.initial_slice != InitialSlice::Defer;
+    const long n0 = emit_initial ? run_with_capacity(launch) : 0L;
+    const SurfFlux fl = emit_initial ? flux(n0) : SurfFlux{};
     std::vector<Real> host = copy_sorted(n0);
     for (auto& o : outs_) {
       write(o, host);
@@ -600,6 +624,40 @@ class SurfaceFinder {
     return closed_;
   }
 
+  // Final isochronous slice (particlisation.final_slice, deferred initial slice): at the current time every cell with eps > 0 gives one element
+  // with dSigma = w (dV, 0, 0, 0), w = (E_grid - E_surface) / E_grid, E_grid the energy on the grid now and E_surface the net energy that has
+  // crossed the iso-energy surface.  The matter that crossed the surface outward is still on the grid (in the cells below eps_sw) and has
+  // already been emitted at the surface; the weight removes it on average, so the energy is conserved by construction and the baryon number
+  // closes up to the difference of E_surface/E_grid and B_surface/B_grid (reported as final_slice_weight_E, _B in the sidecar).
+  void final_slice(Hydro3D<EoS>& h) {
+    if (!started_) throw std::logic_error("SurfaceFinder::final_slice before begin");
+    if (!prm_.final_slice || prm_.method != SurfaceMethod::Isoenergy) return;
+    const auto t0 = clock_();
+    recover(h);
+    const Real dV = grid_.dx * grid_.dx * grid_.dx;
+    const SurfFlux g = scale(all_sums(h), dV);
+    Out& o = outs_[0];
+    auto clip = [](Real w) { return w < 0.0 ? 0.0 : (w > 1.0 ? 1.0 : w); };
+    const Real wE = g.E > 0.0 ? clip((g.E - o.flux_surface.E) / g.E) : 0.0;
+    const Real wB = g.B > 0.0 ? clip((g.B - o.flux_surface.B) / g.B) : 0.0;
+    const Real t_now = meta_.t_init + h.time;
+    auto launch = [&]() {
+      detail::CellElementsK<EoS> k{eos_, h.eps, h.U[0], h.U[1], h.U[2], h.U[3], h.U[4], 0.0, 1e300, 0, t_now, grid_.dx,
+                                   {meta_.origin[0], meta_.origin[1], meta_.origin[2]}, {grid_.g[0], grid_.g[1], grid_.g[2]},
+                                   buf_, count_, errs_, cap_, Kokkos::View<int***>(), 0, wE};
+      Kokkos::parallel_for("surf_final_slice", interior_policy(grid_), k);
+    };
+    const long n = run_with_capacity(launch);
+    o.flux_final = flux(n);
+    write(o, copy_sorted(n));
+    o.n_final = n;
+    o.final_w_E = wE;
+    o.final_w_B = wB;
+    o.t_final = t_now;
+    o.grid_end = g;
+    wall_ += seconds_(t0);
+  }
+
   // Isoenergy elements between two prescribed levels (fields as in detail::StoreLevelK for the interpolation mode of the parameters; ghost
   // layers included in the extents; level a at absolute time t0, level b at t0 + dt), sorted; nothing is written to a file.  Used by the tests.
   std::vector<Real> elements_between(const Field3 a[6], const Field3 b[6], Real t0, Real dt, SurfFlux* fl = nullptr) {
@@ -616,8 +674,8 @@ class SurfaceFinder {
     for (size_t q = 0; q < outs_.size(); ++q) {
       Out& o = outs_[q];
       o.f.close();
-      const SurfFlux inside = o.inside_set ? o.inside : in_end;
-      const SurfFlux tot = o.flux_initial + o.flux_surface;
+      const SurfFlux inside = (o.n_final > 0 || prm_.final_slice) ? SurfFlux{} : (o.inside_set ? o.inside : in_end);  // the final slice empties the grid
+      const SurfFlux tot = o.flux_initial + o.flux_surface + o.flux_final;
       nlohmann::json J = meta_.json;
       J["format_version"] = 1;
       J["byte_order"] = "little";
@@ -625,7 +683,7 @@ class SurfaceFinder {
       J["values_per_element"] = kSurfRecord;
       J["columns"] = {"t", "x", "y", "z", "dsig_0", "dsig_1", "dsig_2", "dsig_3", "u0", "u1", "u2", "u3", "eps", "rho", "T", "mu_B"};
       J["units"] = {{"t", "fm"}, {"x", "fm"}, {"dsig", "fm^3"}, {"u", "1"}, {"eps", "GeV/fm^3"}, {"rho", "fm^-3"}, {"T", "GeV"}, {"mu_B", "GeV"}};
-      J["n_elements"] = o.n_initial + o.n_surface;
+      J["n_elements"] = o.n_initial + o.n_surface + o.n_final;
       J["n_elements_initial_slice"] = o.n_initial;
       J["n_elements_surface"] = o.n_surface;
       J["eps_sw_GeV_fm3"] = prm_.eps_sw();
@@ -633,12 +691,15 @@ class SurfaceFinder {
       J["method"] = prm_.method == SurfaceMethod::Isoenergy ? "isoenergy" : "isochronous";
       J["methods_in_file"] = {{"initial_slice", o.n_initial},
                               {prm_.method == SurfaceMethod::Isoenergy ? "isoenergy" : "isochronous", o.n_surface}};
+      if (prm_.final_slice) J["methods_in_file"]["final_slice"] = o.n_final;
+      J["n_elements_final_slice"] = o.n_final;
       if (prm_.method == SurfaceMethod::Isochronous) {
         J["isochronous_time_after_t_init_fm"] = prm_.isochronous_times_fm[q];
         J["isochronous_time_fm"] = o.t_iso;
         J["isochronous_cells"] = prm_.iso_cells == IsochronousCells::All ? "all" : "above_eps_sw";
       }
-      J["initial_slice"] = prm_.initial_slice == InitialSlice::Remove ? "remove" : "keep";
+      J["initial_slice"] = prm_.initial_slice == InitialSlice::Remove ? "remove" : (prm_.initial_slice == InitialSlice::Keep ? "keep" : "defer");
+      J["final_slice"] = prm_.final_slice;
       J["interpolation"] = prm_.interp == SurfInterp::Conserved ? "conserved" : "primitive";
       J["first_level"] = prm_.first_level == FirstLevel::BeforeRemoval ? "before_removal" : "after_removal";
       J["dx_fm"] = grid_.dx;
@@ -653,6 +714,10 @@ class SurfaceFinder {
       J["totals_initial_on_grid"] = fj(init_);
       J["totals_initial_slice"] = fj(o.flux_initial);
       J["totals_surface"] = fj(o.flux_surface);
+      J["totals_final_slice"] = fj(o.flux_final);
+      if (prm_.final_slice)
+        J["final_slice_info"] = {{"time_fm", o.t_final}, {"weight_E", o.final_w_E}, {"weight_B", o.final_w_B},
+                                 {"grid_end_E_GeV", o.grid_end.E}, {"grid_end_B", o.grid_end.B}};
       J["totals_all_elements"] = fj(tot);
       J["inflow_part_of_totals"] = {{"E_GeV", o.flux_initial.E_neg + o.flux_surface.E_neg}, {"B", o.flux_initial.B_neg + o.flux_surface.B_neg}};
       J["totals_inside_fluid_at_end"] = fj(inside);
@@ -683,8 +748,9 @@ class SurfaceFinder {
   struct Out {
     std::string base;
     std::ofstream f;
-    long n_initial = 0, n_surface = 0;
-    SurfFlux flux_initial, flux_surface, inside, not_emitted;
+    long n_initial = 0, n_surface = 0, n_final = 0;
+    SurfFlux flux_initial, flux_surface, flux_final, inside, not_emitted, grid_end;
+    Real final_w_E = 0.0, final_w_B = 0.0, t_final = 0.0;
     bool inside_set = false;
     Real t_iso = 0.0;
     nlohmann::json summary;
